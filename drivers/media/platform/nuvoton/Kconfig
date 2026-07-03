@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+comment "MA35 media platform drivers"
+
+config VIDEO_MA35D1_CAMERA
+	tristate "MA35D1 camera controller support"
+	depends on MEDIA_CAMERA_SUPPORT
+	depends on VIDEO_DEV && I2C && VIDEO_V4L2_I2C && MEDIA_CONTROLLER
+	depends on ARCH_MA35D1
+	select VIDEOBUF2_DMA_CONTIG
+	select V4L2_FWNODE
+	help
+	  MA35D1 camera
+
+config VIDEO_MA35D0_CAMERA
+	tristate "MA35D0 camera controller support"
+	depends on MEDIA_CAMERA_SUPPORT
+	depends on VIDEO_DEV && I2C && VIDEO_V4L2_I2C && MEDIA_CONTROLLER
+	depends on ARCH_MA35D0
+	select VIDEOBUF2_DMA_CONTIG
+	select V4L2_FWNODE
+	help
+	  MA35D0 camera
+
+config VIDEO_MA35H0_CAMERA
+	tristate "MA35H0 camera controller support"
+	depends on MEDIA_CAMERA_SUPPORT
+	depends on VIDEO_DEV && I2C && VIDEO_V4L2_I2C && MEDIA_CONTROLLER
+	depends on ARCH_MA35H0
+	select VIDEOBUF2_DMA_CONTIG
+	select V4L2_FWNODE
+	help
+	  MA35H0 camera

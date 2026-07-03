@@ -1,0 +1,12 @@
+config DRM_MA35
+	tristate "DRM support for Nuvoton MA35 family SoCs"
+	default ARCH_MA35D1
+	depends on DRM
+	depends on OF && (ARCH_MA35D1 || ARCH_MA35D0 || ARCH_MA35H0 || COMPILE_TEST)
+	select DRM_KMS_HELPER
+	select DRM_KMS_DMA_HELPER
+	select DRM_GEM_DMA_HELPER
+	select REGMAP
+	select REGMAP_MMIO
+	help
+	  DRM display driver for display controller on Nuvoton MA35 family SoCs.
