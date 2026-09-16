@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/misc/nuvoton,ma35d1-misctrl.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35D1 Misc Control Driver
+
+maintainers:
+  - Nuvoton Technology Corporation <cwweng@nuvoton.com>
+
+description:
+  Miscellaneous control interface for the Nuvoton MA35D1 SoC. The driver
+  provides a misc device for issuing MA35D1 SiP service calls.
+
+properties:
+  compatible:
+    const: nuvoton,ma35d1-misctrl
+
+required:
+  - compatible
+
+additionalProperties: false
+
+examples:
+  - |
+    misctrl {
+        compatible = "nuvoton,ma35d1-misctrl";
+    };
+...
+

@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config SND_SOC_NUVOTON
+	tristate
+	select REGMAP_MMIO
+
+config SND_SOC_MA35D1
+	tristate "ASoC support for Nuvoton MA35D1 chip"
+	select SND_SOC_NUVOTON
+	select SND_SOC_GENERIC_DMAENGINE_PCM
+	help
+	  This adds ASoC driver for Nuvoton MA35D1 boards
+	  that can be used with other codecs.
+	  Select Y if you have such device.
+	  If unsure select "N".
+

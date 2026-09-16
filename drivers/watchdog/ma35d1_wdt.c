@@ -22,16 +22,16 @@
 #include <linux/mfd/ma35d1-sys.h>
 #include <dt-bindings/reset/nuvoton,ma35d1-reset.h>
 
-#define REG_WDT_CTL		0x00		/* Watchdog Control Register */
+#define REG_WDT_CTL			0x00		/* Watchdog Control Register */
 #define REG_WDT_ALTCTL		0x04		/* WDT Alternative Control Register */
 #define REG_WDT_RSTCNT		0x08		/* WDT Reset Counter Register */
 
 #define TOUTSEL			(0x0f << 8)     /* wdt interval selection */
 #define WDTEN			(0x01 << 7)	/* wdt enable*/
 #define INTEN			(0x01 << 6)
-#define WKF			(0x01 << 5)
+#define WKF				(0x01 << 5)
 #define WKEN			(0x01 << 4)
-#define IF			(0x01 << 3)
+#define IF				(0x01 << 3)
 #define RSTF			(0x01 << 2)	/* wdt reset flag */
 #define RSTEN			(0x01 << 1)	/* wdt reset enable */
 /*
@@ -172,7 +172,7 @@ static const struct watchdog_info ma35d1wdt_info = {
 	.options	= WDIOF_SETTIMEOUT | WDIOF_KEEPALIVEPING | WDIOF_MAGICCLOSE,
 };
 
-static struct watchdog_ops ma35d1wdt_ops = {
+static const struct watchdog_ops ma35d1wdt_ops = {
 	.owner = THIS_MODULE,
 	.start = ma35d1wdt_start,
 	.stop = ma35d1wdt_stop,
@@ -284,6 +284,7 @@ static void ma35d1wdt_remove(struct platform_device *pdev)
 
 	clk_disable(ma35d1_wdt->eclk);
 	clk_disable(ma35d1_wdt->clk);
+
 }
 
 static void ma35d1wdt_shutdown(struct platform_device *pdev)
@@ -335,6 +336,8 @@ static int __maybe_unused ma35d1wdt_resume(struct platform_device *dev)
 
 static const struct of_device_id ma35d1_wdt_dt_ids[] = {
 	{ .compatible = "nuvoton,ma35d1-wdt" },
+	{ .compatible = "nuvoton,ma35d0-wdt" },
+	{ .compatible = "nuvoton,ma35h0-wdt" },
 	{},
 };
 MODULE_DEVICE_TABLE(of, ma35d1_wdt_dt_ids);

@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/iio/adc/nuvoton,ma35d1-adc.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35 IIO ADC
+
+maintainers:
+  - Joey Lu <yclu4@nuvoton.com>
+
+description:
+  The MA35 ADC is a 12-bit successive-approximation resistive ADC with
+  8 single-ended input channels (CH0-CH7). It supports normal conversion
+  mode via the IIO subsystem and triggered buffer mode for continuous
+  sampling.
+
+  This binding covers the IIO-only ADC driver (nuvoton,ma35d1-adc).
+  For the hybrid ADC/touchscreen driver that drives the same hardware,
+  see nuvoton,ma35d1-ts.yaml.
+
+  Supported on MA35D1, MA35D0, and MA35H0.
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d1-adc
+      - nuvoton,ma35d0-adc
+      - nuvoton,ma35h0-adc
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+    description: ADC gate clock.
+
+  clock-names:
+    items:
+      - const: adc_gate
+
+  clock-rate:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Target ADC clock rate in Hz set via clk_set_rate(). If omitted the
+      driver defaults to 100 MHz. The hardware SPEED bit is cleared when
+      clock-rate >= nuvoton,min-clock-frequency and set otherwise.
+
+  nuvoton,adc-vref:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      ADC reference voltage in millivolts. Used to compute the IIO scale
+      factor reported via IIO_CHAN_INFO_SCALE. Required.
+
+  nuvoton,min-clock-frequency:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Minimum acceptable ADC clock frequency in Hz. When clock-rate is
+      below this value the hardware SPEED bit is set (low-speed mode).
+
+  nuvoton,max-clock-frequency:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Maximum acceptable ADC clock frequency in Hz. Informational; used
+      by the driver for range checking.
+
+  "#io-channel-cells":
+    const: 1
+    description:
+      One cell specifying the ADC channel index (0-7). Required when this
+      node is referenced as an IIO provider by other nodes.
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - clock-names
+  - nuvoton,adc-vref
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/clock/nuvoton,ma35d1-clk.h>
+
+    adc@40420000 {
+        compatible = "nuvoton,ma35d1-adc";
+        reg = <0x40420000 0x500>;
+        interrupts = <GIC_SPI 80 IRQ_TYPE_LEVEL_HIGH>;
+        clocks = <&clk ADC_GATE>;
+        clock-names = "adc_gate";
+        clock-rate = <200000>;
+
+        nuvoton,adc-vref = <3300>;
+        nuvoton,min-clock-frequency = <3200000>;
+        nuvoton,max-clock-frequency = <16000000>;
+        #io-channel-cells = <1>;
+    };

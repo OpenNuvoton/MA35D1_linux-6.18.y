@@ -488,6 +488,10 @@ config UNIPHIER_THERMAL
 	  thermal framework. The driver supports CPU thermal zone temperature
 	  reporting and a couple of trip points.
 
+menu "Nuvoton thermal drivers"
+source "drivers/thermal/nuvoton/Kconfig"
+endmenu
+
 config SPRD_THERMAL
 	tristate "Temperature sensor on Spreadtrum SoCs"
 	depends on ARCH_SPRD || COMPILE_TEST

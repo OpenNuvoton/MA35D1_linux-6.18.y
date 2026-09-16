@@ -85,7 +85,7 @@ static int check_ras_length(struct rsa_key *raw_key)
 	return rsa_len;
 }
 
-int ma35_rsa_hex_to_reg(u8 *input, int keylen, int rsa_bit_len, u32 *reg)
+static int ma35_rsa_hex_to_reg(u8 *input, int keylen, int rsa_bit_len, u32 *reg)
 {
 	int rsa_byte_len = rsa_bit_len/8;
 	u8 buff[NU_RSA_MAX_BYTE_LEN];

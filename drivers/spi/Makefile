@@ -175,9 +175,9 @@ obj-$(CONFIG_SPI_SLAVE_SYSTEM_CONTROL)	+= spi-slave-system-control.o
 # SPI offload triggers
 obj-$(CONFIG_SPI_OFFLOAD_TRIGGER_PWM)	+= spi-offload-trigger-pwm.o
 obj-$(CONFIG_SPI_OFFLOAD_TRIGGER_ADI_UTIL_SD) += spi-offload-trigger-adi-util-sigma-delta.o
-obj-$(CONFIG_SPI_MA35D0_QSPI)           += spi-ma35d0-qspi.o
-obj-$(CONFIG_SPI_MA35D0_SPI)            += spi-ma35d0-spi.o
-obj-$(CONFIG_SPI_MA35H0_QSPI)           += spi-ma35h0-qspi.o
-obj-$(CONFIG_SPI_MA35H0_SPI)            += spi-ma35h0-spi.o
+obj-$(CONFIG_SPI_MA35D0_QSPI)           += spi-ma35d1-qspi.o
+obj-$(CONFIG_SPI_MA35D0_SPI)            += spi-ma35d1-spi.o
+obj-$(CONFIG_SPI_MA35H0_QSPI)           += spi-ma35d1-qspi.o
+obj-$(CONFIG_SPI_MA35H0_SPI)            += spi-ma35d1-spi.o
 obj-$(CONFIG_SPI_MA35D1_QSPI)           += spi-ma35d1-qspi.o
 obj-$(CONFIG_SPI_MA35D1_SPI)            += spi-ma35d1-spi.o

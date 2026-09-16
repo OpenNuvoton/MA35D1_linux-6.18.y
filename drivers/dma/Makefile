@@ -93,5 +93,5 @@ obj-y += stm32/
 obj-y += ti/
 obj-y += xilinx/
 obj-$(CONFIG_MA35D1_DMA) += ma35d1-dma.o
-obj-$(CONFIG_MA35D0_DMA) += ma35d0-dma.o
-obj-$(CONFIG_MA35H0_DMA) += ma35h0-dma.o
+obj-$(CONFIG_MA35D0_DMA) += ma35d1-dma.o
+obj-$(CONFIG_MA35H0_DMA) += ma35d1-dma.o

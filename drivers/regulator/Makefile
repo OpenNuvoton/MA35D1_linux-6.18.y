@@ -213,5 +213,5 @@ obj-$(CONFIG_REGULATOR_WM8994) += wm8994-regulator.o
 
 ccflags-$(CONFIG_REGULATOR_DEBUG) += -DDEBUG
 obj-$(CONFIG_REGULATOR_MA35D1) += ma35d1-regulator.o
-obj-$(CONFIG_REGULATOR_MA35D0) += ma35d0-regulator.o
-obj-$(CONFIG_REGULATOR_MA35H0) += ma35h0-regulator.o
+obj-$(CONFIG_REGULATOR_MA35D0) += ma35d1-regulator.o
+obj-$(CONFIG_REGULATOR_MA35H0) += ma35d1-regulator.o

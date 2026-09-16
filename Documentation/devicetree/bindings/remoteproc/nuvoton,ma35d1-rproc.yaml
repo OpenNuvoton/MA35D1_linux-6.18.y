@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/remoteproc/nuvoton,ma35d1-rproc.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35D1 Cortex-M4 Remote Processor
+
+maintainers:
+  - Joey Lu <yclu4@nuvoton.com>
+
+description:
+  The MA35D1 remote processor driver controls the on-chip Cortex-M4
+  co-processor using the Linux remoteproc framework. The driver loads
+  an ELF firmware image into the M4's SRAM (mapped at physical address
+  0x24000000, 128 KiB) and optionally into a DDR reserved-memory region
+  for larger images that span both memories.
+
+  The M4 is held in reset via the system reset controller and released
+  by the driver on rproc start. Firmware loading is performed by a custom
+  ELF segment loader that handles SRAM-only, DDR-only, and split
+  SRAM+DDR segments.
+
+  The rpmsg communication channel (AMP or AMP-M) is a separate device
+  node and is not part of this binding.
+
+  Supported on MA35D1 only.
+
+properties:
+  compatible:
+    const: nuvoton,ma35d1-rproc
+
+  resets:
+    maxItems: 1
+    description:
+      Reset control for the Cortex-M4 core. The driver asserts this
+      reset before loading firmware and deasserts it to start execution.
+
+  memory-region:
+    maxItems: 1
+    description:
+      Phandle to a reserved DDR memory region used as the M4 DDR load
+      area. The driver maps this region with MEMREMAP_WT and uses it
+      for ELF segments whose physical address falls at or beyond the
+      SRAM size boundary (0x20000).
+
+required:
+  - compatible
+  - resets
+  - memory-region
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/reset/nuvoton,ma35d1-reset.h>
+
+    rproc {
+        compatible = "nuvoton,ma35d1-rproc";
+        resets = <&reset MA35D1_RESET_CM4>;
+        memory-region = <&rproc_buf>;
+    };

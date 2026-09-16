@@ -1844,6 +1844,7 @@ static netdev_tx_t m_can_tx_handler(struct m_can_classdev *cdev,
 	int err;
 	u32 putidx;
 	unsigned int frame_len = can_skb_get_frame_len(skb);
+	unsigned long check_idle_timeout;
 
 	/* Generate ID field for TX buffer Element */
 	/* Common to all supported M_CAN versions */
@@ -1928,6 +1929,18 @@ static netdev_tx_t m_can_tx_handler(struct m_can_classdev *cdev,
 		 * Will be looped back on TX interrupt based on message marker
 		 */
 		can_put_echo_skb(skb, dev, putidx, frame_len);
+
+		if (cdev->nvt_soc_version == 0) {
+			/* Make sure the MA35 series SoC data bus is ready.
+			 * if data bus cannot be ready in 10 ms, we still let it go
+			 * the original TX flow.
+			 */
+			check_idle_timeout = jiffies + msecs_to_jiffies(10);
+			while ((m_can_read(cdev, M_CAN_PSR) & 0x18) != 0x8) {
+				if (time_after(jiffies, check_idle_timeout))
+					break;
+			}
+		}
 
 		if (cdev->is_peripheral) {
 			/* Delay enabling TX FIFO element */

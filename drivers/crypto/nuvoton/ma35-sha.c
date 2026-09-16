@@ -575,7 +575,6 @@ static struct ahash_alg ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA1_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -597,7 +596,6 @@ static struct ahash_alg ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA224_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -619,7 +617,6 @@ static struct ahash_alg ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA256_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -641,7 +638,6 @@ static struct ahash_alg ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA384_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -663,7 +659,6 @@ static struct ahash_alg ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA512_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -686,7 +681,6 @@ static struct ahash_alg ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA1_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -709,7 +703,6 @@ static struct ahash_alg ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA224_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -732,7 +725,6 @@ static struct ahash_alg ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA256_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -755,7 +747,6 @@ static struct ahash_alg ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA384_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -778,7 +769,6 @@ static struct ahash_alg ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA512_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -800,7 +790,6 @@ static struct ahash_alg ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SM3_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -822,7 +811,6 @@ static struct ahash_alg ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = MD5_HMAC_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -847,7 +835,6 @@ static struct ahash_alg  ma35_sha3_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA3_224_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -869,7 +856,6 @@ static struct ahash_alg  ma35_sha3_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA3_256_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -891,7 +877,6 @@ static struct ahash_alg  ma35_sha3_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA3_384_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}
@@ -913,7 +898,6 @@ static struct ahash_alg  ma35_sha3_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA3_512_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
-		.cra_alignmask   = 0xf,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 	}

@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/remoteproc/nuvoton,ma35d1-amp.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35 AMP rpmsg controller (timer-based IPI)
+
+maintainers:
+  - Joey Lu <yclu4@nuvoton.com>
+
+description:
+  The MA35 AMP driver provides an rpmsg communication channel between the
+  Cortex-A35 Linux host and a bare-metal remote core (Cortex-M4 or second
+  A35 core). Inter-processor interrupts are signalled through a pair of
+  hardware timers operating in one-shot mode. The driver implements the
+  Linux rpmsg bus and exposes character devices under /dev/rpmsg_ctrlX for
+  user-space endpoint management.
+
+  The shared memory layout is described by a resource table written by the
+  remote firmware into the reserved-memory region. The driver parses this
+  table on first IPI to discover vring offsets, buffer sizes and channel
+  naming space.
+
+  Supported platforms are MA35D1, MA35D0, and MA35H0.
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d1-amp
+      - nuvoton,ma35d0-amp
+      - nuvoton,ma35h0-amp
+
+  memory-region:
+    maxItems: 1
+    description:
+      Phandle to a reserved-memory node shared between the A35 host and
+      the remote core. The remote firmware writes a resource table at the
+      start of this region describing vring layout and buffer sizes.
+
+  rxipi:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the timer node used as the inbound IPI (remote-to-host
+      interrupt). The driver maps the timer registers, enables the timer
+      interrupt, and requests the IRQ from this node. Typically timer8.
+
+  txipi:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the timer node used as the outbound IPI (host-to-remote
+      interrupt). The driver maps the timer registers and triggers a
+      one-shot count to signal the remote core. Typically timer9.
+
+required:
+  - compatible
+  - memory-region
+  - rxipi
+  - txipi
+
+additionalProperties: false
+
+examples:
+  - |
+    amp: amp {
+        compatible = "nuvoton,ma35d1-amp";
+        memory-region = <&rpmsg_buf>;
+        rxipi = <&timer8>;
+        txipi = <&timer9>;
+    };

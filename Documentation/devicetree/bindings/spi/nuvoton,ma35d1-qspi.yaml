@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/spi/nuvoton,ma35d1-qspi.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35 Series Quad SPI Controller
+
+maintainers:
+  - Chi-Wen Weng <cwweng@nuvoton.com>
+
+description: |
+  The Quad SPI controller in the Nuvoton MA35D0, MA35D1, and MA35H0
+  SoCs supports standard SPI transfers and SPI memory operations in
+  single, dual, and quad I/O modes. The three SoCs use the same QSPI
+  register layout and programming model.
+
+allOf:
+  - $ref: /schemas/spi/spi-controller.yaml#
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d0-qspi
+      - nuvoton,ma35d1-qspi
+      - nuvoton,ma35h0-qspi
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+
+
+  dmas:
+    minItems: 2
+    maxItems: 2
+
+  dma-names:
+    items:
+      - const: tx
+      - const: rx
+
+  nuvoton,pdma-reqsel-rx:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [55, 57]
+    description:
+      PDMA request selector value used for QSPI receive transfers.
+
+  nuvoton,pdma-reqsel-tx:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [54, 56]
+    description:
+      PDMA request selector value used for QSPI transmit transfers.
+
+  num-cs:
+    maximum: 2
+    default: 2
+
+dependencies:
+  dmas:
+    - dma-names
+    - nuvoton,pdma-reqsel-rx
+    - nuvoton,pdma-reqsel-tx
+  dma-names:
+    - dmas
+  nuvoton,pdma-reqsel-rx:
+    - dmas
+  nuvoton,pdma-reqsel-tx:
+    - dmas
+
+required:
+  - compatible
+  - reg
+  - clocks
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/clock/nuvoton,ma35d1-clk.h>
+    #include <dt-bindings/dma/nuvoton,ma35-pdma.h>
+
+    soc {
+        #address-cells = <2>;
+        #size-cells = <2>;
+
+        spi@40680000 {
+            compatible = "nuvoton,ma35d1-qspi";
+            reg = <0 0x40680000 0 0x100>;
+            interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
+            clocks = <&clk QSPI0_GATE>;
+            dmas = <&pdma1 0>, <&pdma1 1>;
+            dma-names = "tx", "rx";
+            nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_QSPI0_TX>;
+            nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_QSPI0_RX>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+        };
+    };
+...

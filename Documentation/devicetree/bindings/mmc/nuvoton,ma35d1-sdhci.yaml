@@ -4,7 +4,7 @@
 $id: http://devicetree.org/schemas/mmc/nuvoton,ma35d1-sdhci.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: Nuvoton MA35D1 SD/SDIO/MMC Controller
+title: Nuvoton MA35 SD/SDIO/MMC Controller
 
 maintainers:
   - Shan-Chun Hung <shanchun1218@gmail.com>
@@ -15,7 +15,9 @@ allOf:
 properties:
   compatible:
     enum:
+      - nuvoton,ma35d0-sdhci
       - nuvoton,ma35d1-sdhci
+      - nuvoton,ma35h0-sdhci
 
   reg:
     maxItems: 1
@@ -24,7 +26,14 @@ properties:
     maxItems: 1
 
   clocks:
-    maxItems: 1
+    minItems: 1
+    maxItems: 2
+
+  clock-names:
+    minItems: 1
+    items:
+      - const: core
+      - const: bus
 
   pinctrl-names:
     minItems: 1
@@ -47,17 +56,36 @@ properties:
 
   nuvoton,sys:
     $ref: /schemas/types.yaml#/definitions/phandle
-    description: phandle to access GCR (Global Control Register) registers.
+    deprecated: true
+    description: Legacy phandle to the MA35 system controller.
+
+  nuvoton,ma35d0-sys:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Phandle to the MA35D0 system controller.
+
+  nuvoton,ma35d1-sys:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Phandle to the MA35D1 system controller.
+
+  nuvoton,ma35h0-sys:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Phandle to the MA35H0 system controller.
+
+  dhci-caps-mask:
+    $ref: /schemas/types.yaml#/definitions/uint64
+    deprecated: true
+    description: Legacy misspelling of sdhci-caps-mask.
+
+  sdhci-caps-mask:
+    $ref: /schemas/types.yaml#/definitions/uint64
 
 required:
   - compatible
   - reg
   - interrupts
   - clocks
-  - pinctrl-names
-  - pinctrl-0
+  - clock-names
   - resets
-  - nuvoton,sys
 
 unevaluatedProperties: false
 

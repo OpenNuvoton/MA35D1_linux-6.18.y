@@ -139,8 +139,8 @@ struct ma35_rpmsg_device {
 struct ma35_rpmsg_endpoint {
 	struct rpmsg_endpoint ept;
 	struct ma35_rpmsg_priv *rpmsg_priv;
-	void *eptdev; // save pointer form char rpmsg endpoint
-	struct sk_buff_head *rxqueue;
+	void *eptdev; // save pointer from char rpmsg endpoint
+	struct sk_buff_head rxqueue; // local queue tracking pending rx bursts
 };
 
 #define to_ma35_rpmsg_device(r)     container_of(r, struct ma35_rpmsg_device, rpdev)
@@ -575,7 +575,7 @@ static int ma35_checksts_thread(void *data) {
 				break;
 		}
 		else {
-			if(skb_queue_empty(ma35_rpept->rxqueue))
+			if(skb_queue_empty(&ma35_rpept->rxqueue))
 				ma35_rpmsg_receive_status(ept, VRING_DESC_STS_ACK);
 			yield();
 		}
@@ -635,7 +635,7 @@ static struct rpmsg_endpoint *ma35_rpmsg_create_ept(struct rpmsg_device *rpdev, 
 
 	ma35_rpept->rpmsg_priv = rpmsg_priv;
 	ma35_rpept->eptdev = priv;
-	ma35_rpept->rxqueue = (struct sk_buff_head *)((char *)ma35_rpept->eptdev + qtoeptdev);
+	skb_queue_head_init(&ma35_rpept->rxqueue);
 	ept = &ma35_rpept->ept;
 	ept->priv = ept_priv;
 	ept_priv->ept_parent = ept;
@@ -861,6 +861,7 @@ static u8 ma35_rpmsg_retrieve_status(struct rpmsg_endpoint *ept)
 static int ma35_rpmsg_receive_status(struct rpmsg_endpoint *ept, u8 sts)
 {
 	struct ma35_rpmsg_ept_priv *ept_priv = ept->priv;
+	struct ma35_rpmsg_endpoint *ma35_rpept = to_ma35_rpmsg_endpoint(ept);
 	struct rsc_table_desc *desc;
 
 	if(!ept)
@@ -869,9 +870,13 @@ static int ma35_rpmsg_receive_status(struct rpmsg_endpoint *ept, u8 sts)
 	desc = ept_priv->bind_desc;
 	desc->STS = sts;
 
-	// If err, trigger check thread
-	if(sts == VRING_DESC_STS_ERR)
+	if(sts == VRING_DESC_STS_ACK) {
+		/* Userspace has consumed the data; clear our pending-burst marker */
+		skb_queue_purge(&ma35_rpept->rxqueue);
+	} else if(sts == VRING_DESC_STS_ERR) {
+		// If err, trigger check thread
 		wake_up_interruptible(&ept_priv->cs_event);
+	}
 
 	return 0;
 }
@@ -885,7 +890,7 @@ static int ma35_rpmsg_receive(struct rpmsg_endpoint *ept, void *buf, int *len)
 	int rxlen;
 
 	// flow control on skb queue
-	if(!skb_queue_empty(ma35_rpept->rxqueue)) {
+	if(!skb_queue_empty(&ma35_rpept->rxqueue)) {
 		ma35_rpmsg_receive_status(ept, VRING_DESC_STS_ERR);
 		return -ENOMEM;
 	}
@@ -903,6 +908,19 @@ static int ma35_rpmsg_receive(struct rpmsg_endpoint *ept, void *buf, int *len)
 		desc = (desc->nxt_offset == 0) ? NULL : (struct rsc_table_desc *)(rpmsg_priv->shmem_base + desc->nxt_offset);
 	}
 	*len = rxlen;
+
+	/*
+	 * Mark this burst as pending in our local queue so the flow-control
+	 * check in ma35_rpmsg_receive() knows the upstream eptdev queue is
+	 * occupied.  A dummy skb is sufficient — only emptiness is tested.
+	 * The entry is purged when ma35_rpmsg_receive_status() is called
+	 * with VRING_DESC_STS_ACK (i.e. userspace has consumed the data).
+	 */
+	if (rxlen > 0) {
+		struct sk_buff *skb = alloc_skb(0, GFP_ATOMIC);
+		if (skb)
+			skb_queue_tail(&ma35_rpept->rxqueue, skb);
+	}
 
 	ma35_rpmsg_receive_status(ept, VRING_DESC_STS_ACK);
 
@@ -1254,15 +1272,13 @@ static int ma35_rpmsg_remove_priv(struct device *dev, void *data)
 	return 0;
 }
 
-static int ma35_rpmsg_remove(struct platform_device *pdev)
+static void ma35_rpmsg_remove(struct platform_device *pdev)
 {
 	int ret;
 
 	ret = device_for_each_child(&pdev->dev, NULL, ma35_rpmsg_remove_priv);
 	if (ret)
 		dev_warn(&pdev->dev, "Can't remove rpmsg device: %d\n", ret);
-
-	return ret;
 }
 
 static int ma35_rpmsg_suspend(struct platform_device *pdev, pm_message_t state)

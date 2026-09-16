@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/hwlock/nuvoton,ma35d1-hwsem.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35 Hardware Semaphore (hwspinlock)
+
+maintainers:
+  - Joey Lu <yclu4@nuvoton.com>
+
+description:
+  The MA35 hardware semaphore provides 8 mutex locks (SEM0-SEM7) shared
+  between the Cortex-A35 host and the Cortex-M4 remote core. Each lock
+  uses a fixed key (0x5500) combined with a core ID to implement a
+  test-and-set protocol in a single register write/read cycle.
+
+  The semaphore registers begin at offset 0x20 from the base address
+  (8 x 4-byte words of prefix registers before SEM0). The driver
+  registers all 8 locks with the Linux hwspinlock framework starting at
+  base ID 0.
+
+  The clock gate must be enabled via the system management (syscon)
+  register unlock sequence before the clock can be prepared.
+
+  Supported on MA35D1, MA35D0, and MA35H0.
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d1-hwsem
+      - nuvoton,ma35d0-hwsem
+      - nuvoton,ma35h0-hwsem
+
+  reg:
+    maxItems: 1
+    description:
+      Register range of the hardware semaphore block. Must cover at least
+      the 8 prefix registers plus 8 semaphore registers (0x40 bytes total).
+
+  clocks:
+    maxItems: 1
+    description: Hardware semaphore gate clock.
+
+  clock-names:
+    items:
+      - const: hws_gate
+
+  interrupts:
+    maxItems: 1
+    description:
+      Combined interrupt line for all 8 semaphore channels. Used by the
+      AMP-M driver (ampm) to receive inbound inter-processor notifications
+      via hwsem acquire/release pulses. Optional when the semaphore is used
+      purely as a mutex (hwspinlock_lock/trylock) without IPI signalling.
+
+  nuvoton,sys:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the system management syscon. Required to perform the
+      register unlock sequence (write 0x59, 0x16, 0x88 to SYS_RLKTZNS)
+      before enabling the hwsem clock gate.
+
+  "#hwsem-cells":
+    const: 1
+    description:
+      One cell specifying the semaphore channel index (0-7). Used by
+      consumers such as the ampm driver to reference individual channels
+      via the rxipi and txipi properties.
+
+required:
+  - compatible
+  - reg
+  - clocks
+  - clock-names
+  - nuvoton,sys
+  - "#hwsem-cells"
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/clock/nuvoton,ma35d1-clk.h>
+
+    hwspinlock@40380000 {
+        compatible = "nuvoton,ma35d1-hwsem";
+        reg = <0x40380000 0x1000>;
+        clocks = <&clk HWS_GATE>;
+        clock-names = "hws_gate";
+        interrupts = <GIC_SPI 2 IRQ_TYPE_LEVEL_HIGH>;
+        nuvoton,sys = <&sys>;
+        #hwsem-cells = <1>;
+    };

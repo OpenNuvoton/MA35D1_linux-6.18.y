@@ -1,0 +1,138 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/input/touchscreen/nuvoton,ma35d1-ts.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35 Hybrid ADC / Resistive Touchscreen
+
+maintainers:
+  - Joey Lu <yclu4@nuvoton.com>
+
+description:
+  The MA35 hybrid ADC/touchscreen driver drives the same 12-bit ADC
+  hardware as the IIO-only driver (nuvoton,ma35d1-adc) but also supports
+  a resistive touchscreen panel connected to the ADC inputs.
+
+  Both functions are controlled by the same hardware block at the same
+  base address. The compatible string selects which driver is loaded.
+  Use nuvoton,ma35d1-ts when touchscreen support is needed (with or
+  without simultaneous IIO channel access); use nuvoton,ma35d1-adc for
+  IIO-only operation.
+
+  Touchscreen wiring modes supported are 4-wire (ts-type = 4, uses
+  CH0-CH3) and 5-wire (ts-type = 5, uses CH0-CH2 plus the 5th wire
+  signal). In 4-wire mode all channels CH4-CH7 remain available for
+  IIO; in 5-wire mode CH3-CH7 remain available.
+
+  Wakeup from suspend via pen-down detection is optionally supported
+  when enable-wakeup is present.
+
+  Supported on MA35D1, MA35D0, and MA35H0.
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d1-ts
+      - nuvoton,ma35d0-ts
+      - nuvoton,ma35h0-ts
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+    description: ADC gate clock.
+
+  clock-names:
+    items:
+      - const: adc_gate
+
+  clock-rate:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Target ADC clock rate in Hz set via clk_set_rate(). If omitted the
+      driver defaults to 1 MHz. The hardware SPEED bit is set when
+      clock-rate < 200000 Hz.
+
+  enable-iio:
+    type: boolean
+    description:
+      When present, register an IIO device alongside the touchscreen.
+      IIO channels available depend on ts-type; touchscreen channels
+      are excluded from the IIO channel mask.
+
+  enable-ts:
+    type: boolean
+    description:
+      When present, register a Linux input device for touchscreen events.
+      Requires ts-type to also be set.
+
+  enable-wakeup:
+    type: boolean
+    description:
+      When present, configure pen-down detection as a system wakeup
+      source during suspend. The ADC interrupt is set as a wakeup IRQ.
+
+  ts-type:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [4, 5]
+    description:
+      Resistive touchscreen wiring type. 4 selects 4-wire mode (X+, X-,
+      Y+, Y- on CH0-CH3); 5 selects 5-wire mode (uses CH0-CH2 plus the
+      additional wire, with pen-up detection via PEUEF interrupt). If
+      enable-ts is set and ts-type is absent the driver defaults to 4.
+
+  ts-pressure-threshold:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Minimum Z-pressure value (0-4095) below which a touch is considered
+      a lift-off in 4-wire mode. Compared against the four Z-sort registers
+      (REG_ADC_ZSORT0-3). Defaults to 20 if absent.
+
+  ts-convert-time:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Number of 5 ms sampling periods to wait without a valid pressure
+      reading before transitioning back to pen-down detection in 4-wire
+      mode. Defaults to 10 if absent.
+
+  "#io-channel-cells":
+    const: 1
+    description:
+      One cell specifying the ADC channel index (0-7). Required when this
+      node is referenced as an IIO provider by other nodes.
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - clock-names
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/clock/nuvoton,ma35d1-clk.h>
+
+    adc@40420000 {
+        compatible = "nuvoton,ma35d1-ts";
+        reg = <0x40420000 0x500>;
+        interrupts = <GIC_SPI 80 IRQ_TYPE_LEVEL_HIGH>;
+        clocks = <&clk ADC_GATE>;
+        clock-names = "adc_gate";
+        clock-rate = <200000>;
+
+        enable-iio;
+        enable-ts;
+        ts-type = <4>;
+        ts-pressure-threshold = <20>;
+        ts-convert-time = <10>;
+
+        #io-channel-cells = <1>;
+    };

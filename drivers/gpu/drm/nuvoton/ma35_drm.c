@@ -19,11 +19,11 @@
 #include <linux/types.h>
 #include <linux/pm_runtime.h>
 
+#include <drm/clients/drm_client_setup.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_fbdev_dma.h>
-#include <drm/drm_fbdev_generic.h>
 #include <drm/drm_gem_dma_helper.h>
 #include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_print.h>
@@ -64,11 +64,11 @@ static struct drm_driver ma35_drm_driver = {
 	.fops				= &ma35_drm_fops,
 	.name				= "ma35-drm",
 	.desc				= "Nuvoton MA35 series DRM driver",
-	.date				= "20250710",
 	.major				= DRIVER_MAJOR,
 	.minor				= DRIVER_MINOR,
 
 	DRM_GEM_DMA_DRIVER_OPS_VMAP_WITH_DUMB_CREATE(ma35_drm_gem_dma_dumb_create),
+	DRM_FBDEV_DMA_DRIVER_OPS,
 };
 
 static struct regmap_config ma35_drm_regmap_config = {
@@ -118,7 +118,6 @@ static int ma35_mode_init(struct ma35_drm *priv)
 		return -EINVAL;
 	}
 
-	drm_dev->max_vblank_count = MA35_DEBUG_COUNTER_MASK;
 	ret = drm_vblank_init(drm_dev, 1);
 	if (ret) {
 		drm_err(drm_dev, "Failed to initialize vblank\n");
@@ -235,7 +234,6 @@ static int ma35_drm_probe(struct platform_device *pdev)
 	struct drm_device *drm_dev;
 	void __iomem *base;
 	struct regmap *regmap = NULL;
-	unsigned int preferred_bpp;
 	int irq;
 	int ret;
 
@@ -351,26 +349,13 @@ static int ma35_drm_probe(struct platform_device *pdev)
 		goto error_mode;
 	}
 
-	switch (drm_dev->mode_config.preferred_depth) {
-	case 16:
-		preferred_bpp = 16;
-		break;
-	case 24:
-	case 32:
-	default:
-		preferred_bpp = 32;
-		break;
-	}
+	drm_client_setup(drm_dev, NULL);
 
-#ifdef CONFIG_DRM_FBDEV_EMULATION
-	if (mem_node) {
-		drm_fbdev_generic_setup(drm_dev, preferred_bpp);
+	if (mem_node)
 		ma35_fbdev_backup_memory(priv, &res);
-	} else {
+	else
 		dev_dbg(dev,
 			"Reserved memory node not present. Driver will try dynamic allocation\n");
-	}
-#endif
 
 	return 0;
 
@@ -487,7 +472,7 @@ static const struct dev_pm_ops ma35_pm_ops = {
 
 static struct platform_driver ma35_drm_platform_driver = {
 	.probe		= ma35_drm_probe,
-	.remove_new		= ma35_drm_remove,
+	.remove		= ma35_drm_remove,
 	.shutdown	= ma35_drm_shutdown,
 	.driver		= {
 		.name		= "ma35-drm",

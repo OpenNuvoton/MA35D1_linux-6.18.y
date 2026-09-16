@@ -7,6 +7,7 @@ config VIDEO_MA35D1_CAMERA
 	depends on MEDIA_CAMERA_SUPPORT
 	depends on VIDEO_DEV && I2C && VIDEO_V4L2_I2C && MEDIA_CONTROLLER
 	depends on ARCH_MA35D1
+	default y
 	select VIDEOBUF2_DMA_CONTIG
 	select V4L2_FWNODE
 	help
@@ -17,6 +18,7 @@ config VIDEO_MA35D0_CAMERA
 	depends on MEDIA_CAMERA_SUPPORT
 	depends on VIDEO_DEV && I2C && VIDEO_V4L2_I2C && MEDIA_CONTROLLER
 	depends on ARCH_MA35D0
+	default y
 	select VIDEOBUF2_DMA_CONTIG
 	select V4L2_FWNODE
 	help
@@ -27,6 +29,7 @@ config VIDEO_MA35H0_CAMERA
 	depends on MEDIA_CAMERA_SUPPORT
 	depends on VIDEO_DEV && I2C && VIDEO_V4L2_I2C && MEDIA_CONTROLLER
 	depends on ARCH_MA35H0
+	default y
 	select VIDEOBUF2_DMA_CONTIG
 	select V4L2_FWNODE
 	help

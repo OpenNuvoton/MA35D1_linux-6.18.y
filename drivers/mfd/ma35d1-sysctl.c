@@ -67,6 +67,10 @@ static int ma35d1_sysctrl_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, &rp);
 
 	rp.regmap  = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "nuvoton,ma35d1-sys");
+	if (IS_ERR(rp.regmap))
+		rp.regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "nuvoton,ma35d0-sys");
+	if (IS_ERR(rp.regmap))
+		rp.regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "nuvoton,ma35h0-sys");
 	if (IS_ERR(rp.regmap)) {
 		dev_err(&pdev->dev, "Failed to get SYS register base\n");
 		return -ENODEV;
@@ -83,6 +87,8 @@ static void ma35d1_sysctrl_remove(struct platform_device *pdev)
 
 static const struct of_device_id ma35d1_sysctrl_match[] = {
 	{ .compatible = "nuvoton,ma35d1-sysctrl", },
+	{ .compatible = "nuvoton,ma35d0-sysctrl", },
+	{ .compatible = "nuvoton,ma35h0-sysctrl", },
 	{}
 };
 

@@ -69,48 +69,13 @@
 
 #define UART_FUN_SEL	0x30
 #define FUN_SEL_UART	0x00000000
-#define FUN_SEL_LIN		0x00000001
+#define FUN_SEL_LIN	0x00000001
 #define FUN_SEL_IrDA	0x00000002
 #define FUN_SEL_RS485	0x00000003
-#define FUN_SEL_Msk		0x00000007
+#define FUN_SEL_Msk	0x00000007
 
 #define UART_REG_WKCTL	0x40
 #define UART_REG_WKSTS	0x44
-
-#define PDMA_UART0_TX   4
-#define PDMA_UART0_RX   5
-#define PDMA_UART1_TX   6
-#define PDMA_UART1_RX   7
-#define PDMA_UART2_TX   8
-#define PDMA_UART2_RX   9
-#define PDMA_UART3_TX  10
-#define PDMA_UART3_RX  11
-#define PDMA_UART4_TX  12
-#define PDMA_UART4_RX  13
-#define PDMA_UART5_TX  14
-#define PDMA_UART5_RX  15
-#define PDMA_UART6_TX  16
-#define PDMA_UART6_RX  17
-#define PDMA_UART7_TX  18
-#define PDMA_UART7_RX  19
-#define PDMA_UART8_TX  20
-#define PDMA_UART8_RX  21
-#define PDMA_UART9_TX  22
-#define PDMA_UART9_RX  23
-#define PDMA_UART10_TX 24
-#define PDMA_UART10_RX 25
-#define PDMA_UART11_TX 26
-#define PDMA_UART11_RX 27
-#define PDMA_UART12_TX 28
-#define PDMA_UART12_RX 29
-#define PDMA_UART13_TX 30
-#define PDMA_UART13_RX 31
-#define PDMA_UART14_TX 32
-#define PDMA_UART14_RX 33
-#define PDMA_UART15_TX 34
-#define PDMA_UART15_RX 35
-#define PDMA_UART16_TX 36
-#define PDMA_UART16_RX 37
 
 struct ma35d1_mem_alloc {
 	u64		size;

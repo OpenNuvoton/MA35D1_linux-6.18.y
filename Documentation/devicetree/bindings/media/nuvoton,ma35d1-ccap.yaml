@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/nuvoton,ma35d1-ccap.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35D1 Camera Capture Interface Controller (CCAP)
+
+maintainers:
+  - Chi-Wen Weng <cwweng@nuvoton.com>
+
+description: |
+  The Camera Capture Interface Controller (CCAP) captures image data from
+  a sensor, processes the image stream, and uses an embedded DMA engine to
+  move data from internal FIFO to system memory through the AHB bus.
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d0-ccap
+      - nuvoton,ma35d1-ccap
+      - nuvoton,ma35h0-ccap
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    items:
+      - const: core
+
+  clock-frequency:
+    description: Input sensor clock frequency in Hz.
+    minimum: 1
+
+  port:
+    $ref: /schemas/graph.yaml#/$defs/port-base
+    unevaluatedProperties: false
+    properties:
+      endpoint:
+        $ref: /schemas/media/video-interfaces.yaml#
+
+required:
+  - compatible
+  - reg
+  - interrupts
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/clock/nuvoton,ma35d1-clk.h>
+    ccap0: ccap@40240000 {
+      compatible = "nuvoton,ma35d1-ccap";
+      reg = <0x40240000 0x2000>;
+      interrupts = <GIC_SPI 21 IRQ_TYPE_LEVEL_HIGH>;
+      clocks = <&clk CCAP0_GATE>;
+      clock-names = "core";
+      clock-frequency = <12000000>;
+      status = "okay";
+
+      port {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        ccap0_1: endpoint {
+          remote-endpoint = <&nt99141_0>;
+          bus-type = <5>;
+          bus-width = <8>;
+          hsync-active = <0>;
+          vsync-active = <0>;
+          pclk-sample = <1>;
+        };
+      };
+    };
+
+...

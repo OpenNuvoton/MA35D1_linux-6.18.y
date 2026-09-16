@@ -167,21 +167,19 @@ static int ma35_crypto_optee_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int ma35_crypto_optee_remove(struct platform_device *pdev)
+static void ma35_crypto_optee_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct nu_crypto_dev *crypto_dev;
 
 	crypto_dev = dev_get_drvdata(dev);
 	if (!crypto_dev)
-		return -ENODEV;
+		return;
 
 	ma35_aes_optee_remove(&pdev->dev, crypto_dev);
 	ma35_sha_optee_remove(&pdev->dev, crypto_dev);
 	ma35_ecc_optee_remove(&pdev->dev, crypto_dev);
 	ma35_rsa_optee_remove(&pdev->dev, crypto_dev);
-
-	return 0;
 }
 
 static const struct of_device_id ma35_crypto_optee_of_match[] = {

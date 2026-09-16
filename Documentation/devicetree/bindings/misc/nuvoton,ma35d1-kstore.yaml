@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/misc/nuvoton,ma35d1-kstore.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35D1 Key Store
+
+maintainers:
+  - Nuvoton Technology Corporation <cwweng@nuvoton.com>
+
+description:
+  The Nuvoton MA35D1 Key Store is a hardware key storage engine found on
+  MA35D1, MA35D0 and MA35H0 SoCs.
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d1-kstore
+      - nuvoton,ma35d0-kstore
+      - nuvoton,ma35h0-kstore
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+  - interrupts
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+
+    kstore: key-store@40340800 {
+        compatible = "nuvoton,ma35d1-kstore";
+        reg = <0x40340800 0x800>;
+        interrupts = <GIC_SPI 41 IRQ_TYPE_LEVEL_HIGH>;
+    };
+...

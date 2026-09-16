@@ -189,7 +189,7 @@ static int ehci_ma35d1_drv_probe(struct platform_device *pdev)
 	if (retval)
 		goto fail_add_hcd;
 	device_wakeup_enable(hcd->self.controller);
-
+	pm_runtime_forbid(&pdev->dev);
 	return retval;
 
 fail_add_hcd:
@@ -263,7 +263,6 @@ static int __maybe_unused ehci_ma35d1_drv_resume(struct device *dev)
 		} while (((reg & 0x20302) != 0x20302) && (timeout-- > 0));
 	}
 	dev_dbg(dev, "REG_SYS_USBPMISCR = 0x%x, timeout = %d\n", reg, timeout);
-	printk("REG_SYS_USBPMISCR = 0x%x, timeout = %d\n", reg, timeout);
 #else
 	clk_enable(ma35d1_ehci->clk);
 #endif
@@ -275,6 +274,8 @@ static int __maybe_unused ehci_ma35d1_drv_resume(struct device *dev)
 #ifdef CONFIG_OF
 static const struct of_device_id ma35d1_ehci_dt_ids[] = {
 	{ .compatible = "nuvoton,ma35d1-ehci" },
+	{ .compatible = "nuvoton,ma35d0-ehci" },
+	{ .compatible = "nuvoton,ma35h0-ehci" },
 	{ /* sentinel */ }
 };
 

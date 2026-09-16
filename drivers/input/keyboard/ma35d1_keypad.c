@@ -95,13 +95,6 @@ struct ma35d1_keypad {
 	unsigned int mask_col;
 };
 
-
-
-void ma35d1_keypad_mfp_set(struct platform_device *pdev)
-{
-
-}
-
 static void ma35d1_keypad_scan_matrix(struct ma35d1_keypad *keypad,
 										unsigned int status)
 {
@@ -283,12 +276,12 @@ static int ma35d1_keypad_probe(struct platform_device *pdev)
 		goto failed_put_clk;
 	}
 
-	if (keypad->kpi_col == 0x0) keypad->mask_col = 0x0;
+	if (keypad->kpi_col == 0x0)
+		keypad->mask_col = 0x0;
 	else {
 		keypad->mask_col = 1;
-		for (i = 0; i < keypad->kpi_col; i++) {
-			keypad->mask_col = keypad->mask_col *2;
-		}
+		for (i = 0; i < keypad->kpi_col; i++)
+			keypad->mask_col = keypad->mask_col * 2;
 		keypad->mask_col = keypad->mask_col - 1;
 		keypad->mask_col = (keypad->mask_col) | (keypad->mask_col << 8) |
 						(keypad->mask_col << 16) | (keypad->mask_col << 24);
@@ -385,6 +378,8 @@ static int ma35d1_keypad_resume(struct platform_device *pdev)
 
 static const struct of_device_id ma35d1_kpi_of_match[] = {
 	{ .compatible = "nuvoton,ma35d1-kpi"},
+	{ .compatible = "nuvoton,ma35d0-kpi"},
+	{ .compatible = "nuvoton,ma35h0-kpi"},
 	{},
 };
 MODULE_DEVICE_TABLE(of, ma35d1_kpi_of_match);

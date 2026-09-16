@@ -19,6 +19,7 @@ obj-y += marvell/
 obj-y += mediatek/
 obj-y += microchip/
 obj-y += nuvoton/
+obj-y += nuvoton/ma35d1/
 obj-y += nvidia/
 obj-y += nxp/
 obj-y += qcom/

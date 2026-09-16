@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/usb/nuvoton,ma35d1-ohci.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35D1 ohci Controller
+
+maintainers:
+  - Nuvoton Technology Corporation <cwweng@nuvoton.com>
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d1-ohci
+      - nuvoton,ma35d0-ohci
+      - nuvoton,ma35h0-ohci
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+
+  nuvoton,sys:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Phandle to the system controller (SYS) registers.
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - nuvoton,sys
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/clock/nuvoton,ma35d1-clk.h>
+
+    ohci0:ohci@40150000 {
+      compatible = "nuvoton,ma35d1-ohci";
+      reg = <0x0 0x40150000 0x0 0x1000>;
+      clocks = <&clk HUSBH0_GATE>;
+      nuvoton,sys = <&sys>;
+      interrupts = <GIC_SPI 35 IRQ_TYPE_LEVEL_HIGH>;
+    };

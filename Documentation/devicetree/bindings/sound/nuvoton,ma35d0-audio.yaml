@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/nuvoton,ma35d0-audio.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35D0 Legacy Audio Card and PCM Platform
+
+maintainers:
+  - Chi-Wen Weng <cwweng@nuvoton.com>
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d0-audio
+      - nuvoton,ma35d0-audio-pcm
+  i2s-controller:
+    $ref: /schemas/types.yaml#/definitions/phandle
+  i2s-platform:
+    $ref: /schemas/types.yaml#/definitions/phandle
+
+required:
+  - compatible
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          const: nuvoton,ma35d0-audio
+    then:
+      required:
+        - i2s-controller
+        - i2s-platform
+
+additionalProperties: false

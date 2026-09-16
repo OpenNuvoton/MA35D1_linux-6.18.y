@@ -76,5 +76,5 @@ obj-$(CONFIG_PWM_VISCONTI)	+= pwm-visconti.o
 obj-$(CONFIG_PWM_VT8500)	+= pwm-vt8500.o
 obj-$(CONFIG_PWM_XILINX)	+= pwm-xilinx.o
 obj-$(CONFIG_PWM_MA35D1)        += pwm-ma35d1.o
-obj-$(CONFIG_PWM_MA35D0)        += pwm-ma35d0.o
-obj-$(CONFIG_PWM_MA35H0)        += pwm-ma35h0.o
+obj-$(CONFIG_PWM_MA35D0)        += pwm-ma35d1.o
+obj-$(CONFIG_PWM_MA35H0)        += pwm-ma35d1.o

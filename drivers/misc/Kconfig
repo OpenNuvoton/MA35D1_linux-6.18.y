@@ -671,39 +671,18 @@ config MA35_KEYSTORE
 
 config MA35D1_EBI
 	tristate "Nuvoton MA35D1 EBI support"
-	depends on ARCH_MA35D1
+	depends on ARCH_MA35D1 || ARCH_MA35D0 || ARCH_MA35H0
+	default y
 	help
-	  This driver provides support for Nuvoton MA35D1 EBI.
-
-config MA35D0_EBI
-	tristate "Nuvoton MA35D0 EBI support"
-	depends on ARCH_MA35D0
-	help
-	  This driver provides support for Nuvoton MA35D0 EBI.
-
-config MA35H0_EBI
-	tristate "Nuvoton MA35H0 EBI support"
-	depends on ARCH_MA35H0
-	help
-	  This driver provides support for Nuvoton MA35H0 EBI.
+	  This driver provides support for Nuvoton MA35D1/MA35D0/MA35H0 EBI.
 
 config MA35D1_TIMER
 	tristate "Nuvoton MA35D1 TIMER support"
-	depends on ARCH_MA35D1
+	depends on ARCH_MA35D1 || ARCH_MA35D0 || ARCH_MA35H0
+	default y
 	help
-	  This driver provides support for Nuvoton MA35D1 TIMER.
+	  This driver provides support for Nuvoton MA35D1/MA35D0/MA35H0 TIMER.
 
-config MA35D0_TIMER
-	tristate "Nuvoton MA35D0 TIMER support"
-	depends on ARCH_MA35D0
-	help
-	  This driver provides support for Nuvoton MA35D0 TIMER.
-
-config MA35H0_TIMER
-	tristate "Nuvoton MA35H0 TIMER support"
-	depends on ARCH_MA35H0
-	help
-	  This driver provides support for Nuvoton MA35H0 TIMER.
 
 config MA35D1_MISCTRL
 	tristate "Nuvoton MA35D1 MISC control support"

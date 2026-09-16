@@ -303,6 +303,6 @@ obj-$(CONFIG_MFD_RSMU_SPI)	+= rsmu_spi.o rsmu_core.o
 obj-$(CONFIG_MFD_UPBOARD_FPGA)	+= upboard-fpga.o
 
 obj-$(CONFIG_MFD_LOONGSON_SE)	+= loongson-se.o
-obj-$(CONFIG_MFD_MA35D1)       += ma35d1-sysctl.o
-obj-$(CONFIG_MFD_MA35D0)       += ma35d0-sysctl.o
-obj-$(CONFIG_MFD_MA35H0)       += ma35h0-sysctl.o
+obj-$(CONFIG_MFD_MA35D1)	+= ma35d1-sysctl.o
+obj-$(CONFIG_MFD_MA35D0)	+= ma35d1-sysctl.o
+obj-$(CONFIG_MFD_MA35H0)	+= ma35d1-sysctl.o

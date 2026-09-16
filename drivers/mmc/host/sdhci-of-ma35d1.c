@@ -150,7 +150,7 @@ static int ma35d1_start_signal_voltage_switch(struct mmc_host *mmc,
 	return ret;
 }
 
-void ma35d1_set_clock(struct sdhci_host *host, unsigned int clock)
+static void ma35d1_set_clock(struct sdhci_host *host, unsigned int clock)
 {
 	/* If clock > 100MHz, Need to set CMD_CONFIG_CHECK = 0 */
 	if (clock > 100000000)
@@ -161,7 +161,7 @@ void ma35d1_set_clock(struct sdhci_host *host, unsigned int clock)
 }
 
 #define REG_RESTORE_NUM 7
-int ma35d1_execute_tuning(struct mmc_host *mmc, u32 opcode)
+static int ma35d1_execute_tuning(struct mmc_host *mmc, u32 opcode)
 {
 	struct sdhci_host *host = mmc_priv(mmc);
 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
@@ -252,15 +252,10 @@ static int ma35d1_probe(struct platform_device *pdev)
 	pltfm_host = sdhci_priv(host);
 	priv = sdhci_pltfm_priv(pltfm_host);
 
-	pltfm_host->clk = devm_clk_get(&pdev->dev, "core");
-	if (IS_ERR(pltfm_host->clk)) {
-		err = PTR_ERR(pltfm_host->clk);
-		dev_err(&pdev->dev, "failed to get core clk: %d\n", err);
-		goto free_pltfm;
-	}
-	err = clk_prepare_enable(pltfm_host->clk);
-	if (err)
-		goto free_pltfm;
+	pltfm_host->clk = devm_clk_get_enabled(&pdev->dev, "core");
+	if (IS_ERR(pltfm_host->clk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(pltfm_host->clk),
+				     "failed to get and enable core clk\n");
 
 	priv->bus_clk = devm_clk_get(&pdev->dev, "bus");
 	if (!IS_ERR(priv->bus_clk))
@@ -278,7 +273,6 @@ static int ma35d1_probe(struct platform_device *pdev)
 		reset_control_deassert(priv->rst);
 	}
 
-
 	sdhci_get_of_property(pdev);
 
 	if (!(host->quirks2 & SDHCI_QUIRK2_NO_1_8_V)) {
@@ -286,11 +280,21 @@ static int ma35d1_probe(struct platform_device *pdev)
 
 		priv->regmap = syscon_regmap_lookup_by_phandle(
 				pdev->dev.of_node, "nuvoton,ma35d1-sys");
+		if (IS_ERR(priv->regmap))
+			priv->regmap = syscon_regmap_lookup_by_phandle(
+					pdev->dev.of_node, "nuvoton,ma35d0-sys");
+		if (IS_ERR(priv->regmap))
+			priv->regmap = syscon_regmap_lookup_by_phandle(
+					pdev->dev.of_node, "nuvoton,ma35h0-sys");
 
-		/* Set SDH1 voltage stable for 1.8V  */
-		regmap_read(priv->regmap, REG_SYS_MISCFCR0, &reg);
-		reg |= SDH1VSTB;
-		regmap_write(priv->regmap, REG_SYS_MISCFCR0, reg);
+		if (IS_ERR(priv->regmap)) {
+			dev_err(&pdev->dev, "Error: Missing sys regmap\n");
+		} else {
+			/* Set SDH1 voltage stable for 1.8V  */
+			regmap_read(priv->regmap, REG_SYS_MISCFCR0, &reg);
+			reg |= SDH1VSTB;
+			regmap_write(priv->regmap, REG_SYS_MISCFCR0, reg);
+		}
 
 		err = ma35d1_sdhci_init_pinctrl(&pdev->dev, priv);
 		if (err == 0) {
@@ -313,27 +317,14 @@ static int ma35d1_probe(struct platform_device *pdev)
 err_clk:
 	clk_disable_unprepare(pltfm_host->clk);
 	clk_disable_unprepare(priv->bus_clk);
-free_pltfm:
-// 	sdhci_pltfm_free(pdev); //schung
+
 	return err;
-}
-
-static void ma35d1_remove(struct platform_device *pdev)
-{
-	struct sdhci_host *host = platform_get_drvdata(pdev);
-	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
-	struct ma35d1_priv *priv = sdhci_pltfm_priv(pltfm_host);
-
-	sdhci_remove_host(host, 0);
-
-	clk_disable_unprepare(pltfm_host->clk);
-	clk_disable_unprepare(priv->bus_clk);
-
-//	sdhci_pltfm_free(pdev); //schung
 }
 
 static const struct of_device_id sdhci_ma35d1_dt_ids[] = {
 	{ .compatible = "nuvoton,ma35d1-sdhci" },
+	{ .compatible = "nuvoton,ma35d0-sdhci" },
+	{ .compatible = "nuvoton,ma35h0-sdhci" },
 	{}
 };
 MODULE_DEVICE_TABLE(of, sdhci_ma35d1_dt_ids);
@@ -344,7 +335,7 @@ static struct platform_driver sdhci_ma35d1_driver = {
 		.of_match_table = sdhci_ma35d1_dt_ids,
 	},
 	.probe	= ma35d1_probe,
-	.remove = ma35d1_remove,
+	.remove = sdhci_pltfm_remove,
 	.shutdown = ma35d1_shutdown,
 };
 module_platform_driver(sdhci_ma35d1_driver);

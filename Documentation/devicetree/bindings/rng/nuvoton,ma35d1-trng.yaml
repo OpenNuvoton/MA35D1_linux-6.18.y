@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/rng/nuvoton,ma35d1-trng.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35D1 True Random Number Generator
+
+maintainers:
+  - Nuvoton Technology Corporation <cwweng@nuvoton.com>
+
+description:
+  The Nuvoton MA35D1 TRNG is a hardware random number generator
+  found on MA35D1, MA35D0 and MA35H0 SoCs.
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d1-trng
+      - nuvoton,ma35d0-trng
+      - nuvoton,ma35h0-trng
+
+  reg:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+
+additionalProperties: false
+
+examples:
+  - |
+    trng: rng@404d0000 {
+        compatible = "nuvoton,ma35d1-trng";
+        reg = <0x404d0000 0x1000>;
+    };
+...
+

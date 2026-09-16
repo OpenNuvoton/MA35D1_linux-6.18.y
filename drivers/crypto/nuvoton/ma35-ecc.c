@@ -1088,23 +1088,6 @@ static struct kpp_alg ma35_ecdh_p384 = {
 	},
 };
 
-void cstr_to_hex(u8 *cstr, u8 *hex_buff, int klen)
-{
-	int i, kidx, bytes;
-
-	bytes = (klen + 7) / 8;
-	hex_buff[bytes] = 0;
-	hex_buff[bytes + 1] = 0;
-
-	i = strlen(cstr) - 1;
-	for (kidx = bytes - 1; kidx >= 0; kidx--) {
-		hex_buff[kidx] = 0;
-		if (i >= 0)
-			hex_buff[kidx] = get_nibble_value(cstr[i--]);
-		if (i >= 0)
-			hex_buff[kidx] |= (get_nibble_value(cstr[i--]) << 4);
-	}
-}
 
 static long ma35_ecc_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {

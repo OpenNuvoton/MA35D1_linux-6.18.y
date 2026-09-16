@@ -112,6 +112,9 @@ properties:
         - starfive,jh7110-dwmac
         - tesla,fsd-ethqos
         - thead,th1520-gmac
+        - nuvoton,ma35d1-dwmac
+        - nuvoton,ma35d0-dwmac
+        - nuvoton,ma35h0-dwmac
 
   reg:
     minItems: 1

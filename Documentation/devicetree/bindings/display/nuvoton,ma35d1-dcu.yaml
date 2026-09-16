@@ -1,0 +1,185 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/nuvoton,ma35d1-dcu.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35 Display Controller Unit (DCU)
+
+maintainers:
+  - Joey Lu <yclu4@nuvoton.com>
+
+description:
+  The MA35 DCU is a display controller supporting up to three hardware
+  layers (primary, overlay, cursor) with independent pixel formats and
+  blending. It drives a parallel RGB/DPI output bus.
+
+  The driver implements the Linux DRM/KMS subsystem with atomic modesetting.
+  The DPI output port connects to a panel or bridge described as a separate
+  DT node using the standard DRM bridge/panel OF graph binding.
+
+  The layers child node is required and must contain between 1 and 3 layer
+  subnodes. Each layer must declare its type. A cursor layer additionally
+  accepts hotspot coordinates.
+
+  An optional reserved-memory region can be provided for framebuffer
+  allocation; without it the driver falls back to CMA dynamic allocation.
+
+  Supported on MA35D1, MA35D0, and MA35H0.
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d1-drm
+      - nuvoton,ma35d0-drm
+      - nuvoton,ma35h0-drm
+
+  reg:
+    maxItems: 1
+    description: DCU register range.
+
+  interrupts:
+    maxItems: 1
+    description: DCU vblank/display interrupt.
+
+  clocks:
+    items:
+      - description: DCU core gate clock.
+      - description: DCU pixel divider clock. The driver calls clk_set_rate()
+          on this clock to match the panel pixel clock at mode-set time.
+
+  clock-names:
+    items:
+      - const: dcu_gate
+      - const: dcup_div
+
+  resets:
+    maxItems: 1
+    description: Reset line for the DCU block.
+
+  memory-region:
+    maxItems: 1
+    description:
+      Optional phandle to a reserved-memory node with compatible
+      "shared-dma-pool". When present the driver registers it as the DMA
+      memory region for framebuffer allocation. When absent the driver
+      falls back to CMA dynamic allocation.
+
+  port:
+    $ref: /schemas/graph.yaml#/properties/port
+    description:
+      DPI output port. The single endpoint connects to the downstream
+      panel or bridge node. The driver discovers the bridge via
+      devm_drm_of_get_bridge() on port 0, endpoint 0.
+
+  layers:
+    type: object
+    description:
+      Required container node for the hardware display layer subnodes.
+      Must have between 1 and 3 child nodes. Each child represents one
+      DCU hardware layer.
+
+    properties:
+      "#address-cells":
+        const: 1
+      "#size-cells":
+        const: 0
+
+    patternProperties:
+      "^layer@[0-9]+$":
+        type: object
+        description: A single DCU display layer.
+
+        properties:
+          reg:
+            maxItems: 1
+            description: Layer index, must match the unit address.
+
+          layer-id:
+            $ref: /schemas/types.yaml#/definitions/uint32
+            minimum: 0
+            maximum: 2
+            description:
+              Hardware layer index. 0 is the primary layer, 1 the overlay,
+              2 the cursor layer.
+
+          layer-type:
+            $ref: /schemas/types.yaml#/definitions/string
+            enum:
+              - primary
+              - overlay
+              - cursor
+            description:
+              Functional role of this layer. Exactly one layer must be
+              "primary". At most one layer may be "cursor".
+
+        required:
+          - reg
+          - layer-id
+          - layer-type
+
+        additionalProperties: false
+
+    required:
+      - "#address-cells"
+      - "#size-cells"
+
+    additionalProperties: false
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - clock-names
+  - resets
+  - layers
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/clock/nuvoton,ma35d1-clk.h>
+    #include <dt-bindings/reset/nuvoton,ma35d1-reset.h>
+
+    display@40260000 {
+        compatible = "nuvoton,ma35d1-drm";
+        reg = <0x40260000 0x2000>;
+        interrupts = <GIC_SPI 20 IRQ_TYPE_LEVEL_HIGH>;
+        clocks = <&clk DCU_GATE>, <&clk DCUP_DIV>;
+        clock-names = "dcu_gate", "dcup_div";
+        resets = <&reset MA35D1_RESET_DISP>;
+
+        layers {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            layer@0 {
+                reg = <0>;
+                layer-id = <0>;
+                layer-type = "primary";
+            };
+
+            layer@1 {
+                reg = <1>;
+                layer-id = <1>;
+                layer-type = "overlay";
+            };
+
+            layer@2 {
+                reg = <2>;
+                layer-id = <2>;
+                layer-type = "cursor";
+            };
+        };
+
+        port {
+            #address-cells = <1>;
+            #size-cells = <0>;
+            dpi_out: endpoint@0 {
+                reg = <0>;
+                remote-endpoint = <&panel_in>;
+            };
+        };
+    };

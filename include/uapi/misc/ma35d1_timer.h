@@ -1,5 +1,5 @@
-/* linux/arch/arm/mach-nuc980/include/mach/ma35d1-timer.h
- *
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+/*
  * Copyright (c) 2020 Nuvoton technology corporation
  * All rights reserved.
  *
@@ -16,16 +16,16 @@
 #include <linux/ioctl.h>
 
 #define TMR_IOC_MAGIC		'e'
-#define TMR_IOC_MAXNR		3
+#define TMR_IOC_MAXNR		8
 
-#define TMR_IOC_STOP			_IO(TMR_IOC_MAGIC, 0)
-#define TMR_IOC_TOGGLE			_IOW(TMR_IOC_MAGIC, 1, unsigned int *)
+#define TMR_IOC_STOP			    _IO(TMR_IOC_MAGIC, 0)
+#define TMR_IOC_TOGGLE			    _IOW(TMR_IOC_MAGIC, 1, unsigned int *)
 #define TMR_IOC_FREE_COUNTING		_IOW(TMR_IOC_MAGIC, 2, unsigned int *)
 #define TMR_IOC_TRIGGER_COUNTING	_IOW(TMR_IOC_MAGIC, 3, unsigned int *)
-#define TMR_IOC_PERIODIC		_IOW(TMR_IOC_MAGIC, 4, unsigned int *)
+#define TMR_IOC_PERIODIC		    _IOW(TMR_IOC_MAGIC, 4, unsigned int *)
 #define TMR_IOC_PERIODIC_FOR_WKUP	_IOW(TMR_IOC_MAGIC, 5, unsigned int *)
-#define TMR_IOC_CLKLXT			_IOW(TMR_IOC_MAGIC, 6, unsigned int *)
-#define TMR_IOC_CLKHXT			_IOW(TMR_IOC_MAGIC, 7, unsigned int *)
+#define TMR_IOC_CLKLXT			    _IOW(TMR_IOC_MAGIC, 6, unsigned int *)
+#define TMR_IOC_CLKHXT			    _IOW(TMR_IOC_MAGIC, 7, unsigned int *)
 #define TMR_IOC_EVENT_COUNTING		_IOW(TMR_IOC_MAGIC, 8, unsigned int *)
 // Valid parameters for capture mode ioctls
 #define TMR_CAP_EDGE_FF			0x00000

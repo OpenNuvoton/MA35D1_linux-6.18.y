@@ -261,7 +261,7 @@ static int ma35_adc_probe(struct platform_device *pdev)
 		return PTR_ERR(priv->adc_clk);
 
 	if (of_property_read_u32(np, "clock-rate", &clock_rate)) {
-		dev_warn(&pdev->dev, "Missing clock-rate in the DT, set to 1MHz\n");
+		dev_warn(&pdev->dev, "Missing clock-rate in the DT, set to 100MHz\n");
 		clock_rate = ADC_DEFAULT_CLK_RATE;
 	}
 
@@ -272,7 +272,11 @@ static int ma35_adc_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	clk_set_rate(priv->adc_clk, clock_rate);
+	ret = clk_set_rate(priv->adc_clk, clock_rate);
+	if (ret) {
+		dev_err(&pdev->dev, "Failed to set ADC clock rate\n");
+		goto err_disable_clk;
+	}
 
 	if (of_property_read_u32(np, "nuvoton,min-clock-frequency", &min_clock_freq)) {
 		dev_warn(&pdev->dev, "Missing min-clock-frequency\n");
@@ -284,7 +288,8 @@ static int ma35_adc_probe(struct platform_device *pdev)
 
 	if (of_property_read_u32(np, "nuvoton,adc-vref", &vref)) {
 		dev_err(&pdev->dev, "Missing adc-vref property in the DT.\n");
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err_disable_clk;
 	}
 	priv->vref_mv = vref;
 
@@ -306,7 +311,7 @@ static int ma35_adc_probe(struct platform_device *pdev)
 				0, dev_name(&pdev->dev), indio_dev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Failed to request irq\n");
-		return ret;
+		goto err_power_down;
 	}
 
 	init_completion(&priv->conv_completion);
@@ -330,7 +335,8 @@ static int ma35_adc_probe(struct platform_device *pdev)
 					GFP_KERNEL);
 	if (!chan_array) {
 		dev_err(&pdev->dev, "Failed to allocate memory for channels\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto err_power_down;
 	}
 
 	for_each_set_bit(bit, &mask, ADC_CH_NUM) {
@@ -362,7 +368,7 @@ static int ma35_adc_probe(struct platform_device *pdev)
 				&iio_pollfunc_store_time, ma35_iio_buffer_trigger_handler, NULL);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Failed to setup iio triggered buffer\n");
-		return ret;
+		goto err_power_down;
 	}
 	
 	ret = iio_device_register(indio_dev);
@@ -372,10 +378,17 @@ static int ma35_adc_probe(struct platform_device *pdev)
 		__raw_writel(__raw_readl(priv->base + REG_ADC_CTL) & ~ADC_CTL_ADEN,
 			priv->base + REG_ADC_CTL);
 		
-		return ret;
+		goto err_disable_clk;
 	}
 
 	return 0;
+
+err_power_down:
+	__raw_writel(__raw_readl(priv->base + REG_ADC_CTL) & ~ADC_CTL_ADEN,
+			priv->base + REG_ADC_CTL);
+err_disable_clk:
+	clk_disable_unprepare(priv->adc_clk);
+	return ret;
 }
 
 static void ma35_adc_remove(struct platform_device *pdev)
@@ -414,15 +427,18 @@ static int ma35_adc_resume(struct device *dev)
 {
 	struct iio_dev *indio_dev = dev_get_drvdata(dev);
 	struct ma35_iio_priv *priv = iio_priv(indio_dev);
+	int ret;
 
-	clk_prepare_enable(priv->adc_clk);
-
-	/* enable irq */
-	enable_irq(priv->irq);
+	ret = clk_prepare_enable(priv->adc_clk);
+	if (ret)
+		return ret;
 
 	/* Power up the ADC */
 	__raw_writel(__raw_readl(priv->base + REG_ADC_CTL) | ADC_CTL_ADEN,
 		priv->base + REG_ADC_CTL);
+
+	/* enable irq */
+	enable_irq(priv->irq);
 
 	return 0;
 }

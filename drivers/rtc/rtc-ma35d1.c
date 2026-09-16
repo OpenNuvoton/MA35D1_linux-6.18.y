@@ -179,13 +179,13 @@ static irqreturn_t ma35d1_rtc_interrupt(int irq, void *_rtc)
 	return IRQ_HANDLED;
 }
 
-static int check_rtc_access_enable(struct ma35d1_rtc *rtc)
+static int check_rtc_access_enable(struct device *dev, struct ma35d1_rtc *rtc)
 {
 	if (!(rtc_reg_read(rtc, REG_RTC_INIT) & INIT_ACTIVE)) {
 		rtc_reg_write(rtc, REG_RTC_INIT, RTC_INIT_MAGIC);
 		mdelay(1);
 		if (!(rtc_reg_read(rtc, REG_RTC_INIT) & INIT_ACTIVE)) {
-			dev_err(rtc->rtc_dev->dev.parent, "RTC access is not enabled\n");
+			dev_err(dev, "RTC access is not enabled\n");
 			return -EIO;
 		}
 	}
@@ -288,7 +288,7 @@ static int ma35d1_rtc_set_time(struct device *dev, struct rtc_time *tm)
 
 	ma35d1_rtc_bin2bcd(dev, tm, &gettm);
 
-	ret = check_rtc_access_enable(rtc);
+	ret = check_rtc_access_enable(dev, rtc);
 	if (ret)
 		return ret;
 
@@ -329,7 +329,7 @@ static int ma35d1_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 	u32 cal_val, time_val;
 	int ret;
 
-	ret = check_rtc_access_enable(rtc);
+	ret = check_rtc_access_enable(dev, rtc);
 	if (ret)
 		return ret;
 
@@ -441,7 +441,7 @@ static int ma35d1_rtc_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, rtc);
 
-	err = check_rtc_access_enable(rtc);
+	err = check_rtc_access_enable(&pdev->dev, rtc);
 	if (err)
 		return err;
 
@@ -513,13 +513,12 @@ static int ma35d1_rtc_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int __exit ma35d1_rtc_remove(struct platform_device *pdev)
+static void ma35d1_rtc_remove(struct platform_device *pdev)
 {
 	device_init_wakeup(&pdev->dev, 0);
 
 	platform_set_drvdata(pdev, NULL);
 
-	return 0;
 }
 
 static int ma35d1_rtc_suspend(struct platform_device *pdev, pm_message_t state)
@@ -550,13 +549,15 @@ static int ma35d1_rtc_resume(struct platform_device *pdev)
 
 static const struct of_device_id ma35d1_rtc_of_match[] = {
 	{ .compatible = "nuvoton,ma35d1-rtc"},
+	{ .compatible = "nuvoton,ma35d0-rtc"},
+	{ .compatible = "nuvoton,ma35h0-rtc"},
 	{},
 };
 MODULE_DEVICE_TABLE(of, ma35d1_rtc_of_match);
 
 
 static struct platform_driver ma35d1_rtc_driver = {
-	.remove     = __exit_p(ma35d1_rtc_remove),
+	.remove     = ma35d1_rtc_remove,
 	.suspend    = ma35d1_rtc_suspend,
 	.resume     = ma35d1_rtc_resume,
 	.probe      = ma35d1_rtc_probe,

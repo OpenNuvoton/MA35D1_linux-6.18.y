@@ -1728,6 +1728,8 @@ static void ccap_remove(struct platform_device *pdev)
 
 static const struct of_device_id ccap_of_match[] = {
 	{.compatible = "nuvoton,ma35d1-ccap" },
+	{.compatible = "nuvoton,ma35d0-ccap" },
+	{.compatible = "nuvoton,ma35h0-ccap" },
 	{ },
 };
 

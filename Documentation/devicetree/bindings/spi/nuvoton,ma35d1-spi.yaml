@@ -1,0 +1,153 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/spi/nuvoton,ma35d1-spi.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35 Series SPI Controller
+
+maintainers:
+  - Chi-Wen Weng <cwweng@nuvoton.com>
+
+description: |
+  The Nuvoton MA35D0, MA35D1, and MA35H0 SoCs contain SPI controllers. Each controller supports
+  full-duplex transfers, two native chip-select signals, 8- to 32-bit words,
+  programmable clock polarity and phase, and optional PDMA transfers.
+
+  This binding describes the controller operating in SPI master mode. The I2S
+  function provided by the same hardware block is handled by a separate audio
+  driver and binding.
+
+allOf:
+  - $ref: spi-controller.yaml#
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d0-spi
+      - nuvoton,ma35d1-spi
+      - nuvoton,ma35h0-spi
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+
+  dmas:
+    minItems: 2
+    maxItems: 2
+
+  dma-names:
+    items:
+      - const: tx
+      - const: rx
+
+  nuvoton,pdma-reqsel-tx:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [60, 62, 64, 66]
+    description:
+      MA35 PDMA request selector used for SPI transmit requests.
+
+  nuvoton,pdma-reqsel-rx:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [61, 63, 65, 67]
+    description:
+      MA35 PDMA request selector used for SPI receive requests.
+
+  use_pdma:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [0, 1]
+    deprecated: true
+    description: Legacy switch selecting interrupt or PDMA transfers.
+
+  num_cs:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 2
+    deprecated: true
+    description: Legacy number of native chip selects.
+
+  lsb:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [0, 1]
+    deprecated: true
+
+  sleep:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    deprecated: true
+
+  txbitlen:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 1
+    maximum: 32
+    deprecated: true
+
+  bus_num:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    deprecated: true
+
+  spimode:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 3
+    deprecated: true
+
+  mrxphase:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 15
+    deprecated: true
+
+  num-cs:
+    const: 2
+    default: 2
+
+  cs-gpios: false
+
+  spi-slave: false
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - "#address-cells"
+  - "#size-cells"
+
+dependencies:
+  dmas:
+    - dma-names
+    - nuvoton,pdma-reqsel-tx
+    - nuvoton,pdma-reqsel-rx
+  dma-names:
+    - dmas
+  nuvoton,pdma-reqsel-tx:
+    - dmas
+  nuvoton,pdma-reqsel-rx:
+    - dmas
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/clock/nuvoton,ma35d1-clk.h>
+    #include <dt-bindings/dma/nuvoton,ma35-pdma.h>
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+
+    spi@40600000 {
+        compatible = "nuvoton,ma35d1-spi";
+        reg = <0x40600000 0x10000>;
+        interrupts = <GIC_SPI 89 IRQ_TYPE_LEVEL_HIGH>;
+        clocks = <&clk SPI0_GATE>;
+
+        dmas = <&pdma1 4>, <&pdma1 5>;
+        dma-names = "tx", "rx";
+        nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_SPI0_TX>;
+        nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_SPI0_RX>;
+
+        num_cs = <2>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+    };
+...

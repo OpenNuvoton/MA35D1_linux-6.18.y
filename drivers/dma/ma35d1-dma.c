@@ -123,7 +123,17 @@ static inline struct ma35d1_desc *to_ma35d1_dma_desc(struct dma_async_tx_descrip
 
 static void ma35d1_dma_desc_free(struct virt_dma_desc *vd)
 {
-	kfree(container_of(vd, struct ma35d1_desc, vd));
+	struct ma35d1_desc *d = container_of(vd, struct ma35d1_desc, vd);
+	struct ma35d1_chan *ch;
+
+	if (d->sg_addr && vd->tx.chan) {
+		ch = to_ma35d1_dma_chan(vd->tx.chan);
+		dma_unmap_single(ch->dev, d->sg_addr,
+				 sizeof(struct ma35d1_sg) * d->sglen,
+				 DMA_TO_DEVICE);
+		d->sg_addr = 0;
+	}
+	kfree(d);
 }
 
 static int ma35d1_terminate_all(struct dma_chan *chan)
@@ -298,7 +308,7 @@ static struct dma_async_tx_descriptor *ma35d1_prep_dma_memcpy(struct dma_chan *c
 	size_t bytes, tlen;
 	int i;
 
-	sg_len = 1 + len / PDMA_MAX_CHAN_BYTES;
+	sg_len = DIV_ROUND_UP(len, PDMA_MAX_CHAN_BYTES);
 	d = kzalloc(struct_size(d, sg, max_t(size_t, sg_len, 4)), GFP_ATOMIC);
 	if (!d)
 		return NULL;
@@ -306,8 +316,8 @@ static struct dma_async_tx_descriptor *ma35d1_prep_dma_memcpy(struct dma_chan *c
 	d->pcfg.reqsel = 0;
 	ma35d1_set_channel_params(ch);
 	ma35d1_set_transfer_params(ch, d->pcfg.reqsel);
-	d->sg_addr =
-	    dma_map_single(ch->dev, d->sg, sizeof(struct ma35d1_sg) * sg_len, DMA_TO_DEVICE);
+	d->sg_addr = dma_map_single(ch->dev, d->sg, sizeof(*d->sg) * sg_len, DMA_TO_DEVICE);
+	dma_sync_single_for_cpu(ch->dev, d->sg_addr, sizeof(*d->sg) * sg_len, DMA_TO_DEVICE);
 	writel(d->sg_addr, ch->base + (ch->ch_num * PDMA_OFFSET_CHAN_SIZE) + PDMA_DSCT_NEXT);
 
 	for (i = 0; i < sg_len; i++) {
@@ -321,10 +331,10 @@ static struct dma_async_tx_descriptor *ma35d1_prep_dma_memcpy(struct dma_chan *c
 		len -= tlen;
 		d->sg[i].next = d->sg_addr + (16 * (i + 1) + 4);
 	}
-	dma_sync_single_for_cpu(ch->dev, d->sg_addr, sizeof(*d->sg), DMA_TO_DEVICE);
 	d->sglen = sg_len;
 	d->sg[d->sglen - 1].ctl &= ~(PDMA_OP_MSK | PDMA_TBINTDIS);
 	d->sg[d->sglen - 1].ctl |= PDMA_OP_BASIC;
+	dma_sync_single_for_device(ch->dev, d->sg_addr, sizeof(*d->sg) * sg_len, DMA_TO_DEVICE);
 	d->dma_dir = DMA_MEM_TO_MEM;
 	d->cyclic = false;
 
@@ -361,9 +371,8 @@ static struct dma_async_tx_descriptor *ma35d1_prep_slave_sg(struct dma_chan *cha
 	memcpy(&d->pcfg, ch->cfg.peripheral_config, ch->cfg.peripheral_size);
 	ma35d1_set_channel_params(ch);
 	ma35d1_set_transfer_params(ch, d->pcfg.reqsel);
-	d->sg_addr = (u32) dma_map_single(ch->dev,
-					  (void *)(d->sg),
-					  sizeof(struct ma35d1_sg) * sg_len, DMA_BIDIRECTIONAL);
+	d->sg_addr = dma_map_single(ch->dev, d->sg, sizeof(*d->sg) * sg_len, DMA_TO_DEVICE);
+	dma_sync_single_for_cpu(ch->dev, d->sg_addr, sizeof(*d->sg) * sg_len, DMA_TO_DEVICE);
 	writel(d->sg_addr, ch->base + (ch->ch_num * PDMA_OFFSET_CHAN_SIZE) + PDMA_DSCT_NEXT);
 	for_each_sg(sgl, sgent, sg_len, i) {
 		d->sg[i].ctl =
@@ -384,7 +393,7 @@ static struct dma_async_tx_descriptor *ma35d1_prep_slave_sg(struct dma_chan *cha
 	d->sglen = sg_len;
 	d->sg[d->sglen - 1].ctl &= ~(PDMA_OP_MSK | PDMA_TBINTDIS);
 	d->sg[d->sglen - 1].ctl |= PDMA_OP_BASIC;
-	dma_sync_single_for_cpu(ch->dev, d->sg_addr, sizeof(*d->sg) * d->sglen, DMA_TO_DEVICE);
+	dma_sync_single_for_device(ch->dev, d->sg_addr, sizeof(*d->sg) * d->sglen, DMA_TO_DEVICE);
 	d->cyclic = false;
 	ch->error = 0;
 
@@ -415,10 +424,8 @@ static struct dma_async_tx_descriptor *ma35d1_prep_dma_cyclic(struct dma_chan *c
 	memcpy(&d->pcfg, ch->cfg.peripheral_config, ch->cfg.peripheral_size);
 	ma35d1_set_channel_params(ch);
 	ma35d1_set_transfer_params(ch, d->pcfg.reqsel);
-	d->sg_addr = (u32) dma_map_single(ch->dev,
-					  (void *)(d->sg),
-					  sizeof(struct ma35d1_sg) * sg_len, DMA_BIDIRECTIONAL);
-
+	d->sg_addr = dma_map_single(ch->dev, d->sg, sizeof(*d->sg) * sg_len, DMA_TO_DEVICE);
+	dma_sync_single_for_cpu(ch->dev, d->sg_addr, sizeof(*d->sg) * sg_len, DMA_TO_DEVICE);
 	writel(d->sg_addr, ch->base + (ch->ch_num * PDMA_OFFSET_CHAN_SIZE) + PDMA_DSCT_NEXT);
 	/* Split the buffer into period size chunks */
 	for (offset = 0, i = 0; offset < buf_len; offset += period_len, i++) {
@@ -523,7 +530,6 @@ static void ma35d1_dma_start_desc(struct dma_chan *chan)
 	list_del(&vd->node);
 	ch->desc = to_ma35d1_dma_desc(&vd->tx);
 	ma35d1_dma_start_sg(ch);
-
 }
 
 static void ma35d1_issue_pending(struct dma_chan *chan)
@@ -565,6 +571,9 @@ static irqreturn_t ma35d1_dma_interrupt(int irq, void *devid)
 	intsts = readl(ch->base + PDMA_INTSTS);
 	tdsts = readl(ch->base + PDMA_TDSTS);
 	for (i = (dmadev->nr_chans - 1); i >= 0; i--, ch--) {
+		unsigned long flags;
+
+		spin_lock_irqsave(&ch->vc.lock, flags);
 		/* Transfer done interrupt */
 		if (tdsts & (1 << i)) {
 			writel((1 << i), ch->base + PDMA_TDSTS);
@@ -597,6 +606,8 @@ static irqreturn_t ma35d1_dma_interrupt(int irq, void *devid)
 			writel(0x1, ch->base + PDMA_TDSTS);
 			ch->error = 1;
 		}
+
+		spin_unlock_irqrestore(&ch->vc.lock, flags);
 	}
 
 	return IRQ_HANDLED;
@@ -733,6 +744,8 @@ static void ma35d1_remove(struct platform_device *pdev)
 
 static const struct of_device_id ma35d1_dma_match[] = {
 	{.compatible = "nuvoton,ma35d1-dma" },
+	{.compatible = "nuvoton,ma35d0-dma" },
+	{.compatible = "nuvoton,ma35h0-dma" },
 	{ }
 };
 

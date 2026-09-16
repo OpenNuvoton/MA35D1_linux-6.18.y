@@ -115,5 +115,5 @@ endif
 obj-$(CONFIG_MMC_SDHCI_XENON)	+= sdhci-xenon-driver.o
 sdhci-xenon-driver-y		+= sdhci-xenon.o sdhci-xenon-phy.o
 obj-$(CONFIG_MMC_SDHCI_OF_MA35D1)       += sdhci-of-ma35d1.o
-obj-$(CONFIG_MMC_SDHCI_OF_MA35D0)       += sdhci-of-ma35d0.o
-obj-$(CONFIG_MMC_SDHCI_OF_MA35H0)       += sdhci-of-ma35h0.o
+obj-$(CONFIG_MMC_SDHCI_OF_MA35D0)       += sdhci-of-ma35d1.o
+obj-$(CONFIG_MMC_SDHCI_OF_MA35H0)       += sdhci-of-ma35d1.o

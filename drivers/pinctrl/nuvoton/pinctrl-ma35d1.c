@@ -284,6 +284,38 @@ static const struct pinctrl_pin_desc ma35d1_pins[] = {
 		NVT_MUX(0x0, "GPC7"),
 		NVT_MUX(0x3, "CAN1_TXD"),
 		NVT_MUX(0x6, "SD0_WP")),
+	NVT_PIN(0x28, PC8, 0x94, 0x0,
+		NVT_MUX(0x0, "GPC8"),
+		NVT_MUX(0x1, "EPWM2_CH0"),
+		NVT_MUX(0x2, "UART10_nCTS"),
+		NVT_MUX(0x3, "UART9_RXD"),
+		NVT_MUX(0x4, "I2C0_SDA"),
+		NVT_MUX(0x5, "SPI1_SS0"),
+		NVT_MUX(0x6, "eMMC0_DAT4")),
+	NVT_PIN(0x29, PC9, 0x94, 0x4,
+		NVT_MUX(0x0, "GPC9"),
+		NVT_MUX(0x1, "EPWM2_CH1"),
+		NVT_MUX(0x2, "UART10_nRTS"),
+		NVT_MUX(0x3, "UART9_TXD"),
+		NVT_MUX(0x4, "I2C0_SCL"),
+		NVT_MUX(0x5, "SPI1_CLK"),
+		NVT_MUX(0x6, "eMMC0_DAT5")),
+	NVT_PIN(0x2a, PC10, 0x94, 0x8,
+		NVT_MUX(0x0, "GPC10"),
+		NVT_MUX(0x1, "EPWM2_CH2"),
+		NVT_MUX(0x2, "UART10_RXD"),
+		NVT_MUX(0x3, "CAN2_RXD"),
+		NVT_MUX(0x4, "USBHL0_DM"),
+		NVT_MUX(0x5, "SPI1_MOSI"),
+		NVT_MUX(0x6, "eMMC0_DAT6")),
+	NVT_PIN(0x2b, PC11, 0x94, 0xC,
+		NVT_MUX(0x0, "GPC11"),
+		NVT_MUX(0x1, "EPWM2_CH3"),
+		NVT_MUX(0x2, "UART10_TXD"),
+		NVT_MUX(0x3, "CAN2_TXD"),
+		NVT_MUX(0x4, "USBHL0_DP"),
+		NVT_MUX(0x5, "SPI1_MISO"),
+		NVT_MUX(0x6, "eMMC0_DAT7")),
 	NVT_PIN(0x2c, PC12, 0x94, 0x10,
 		NVT_MUX(0x0, "GPC12"),
 		NVT_MUX(0x2, "UART12_nCTS"),
@@ -1714,7 +1746,7 @@ static const struct pinctrl_pin_desc ma35d1_pins[] = {
 		NVT_MUX(0xB, "TM6")),
 };
 
-int ma35d1_get_pin_num(int offset, int shift)
+static int ma35d1_get_pin_num(int offset, int shift)
 {
 	// 8 pins per register.
 	return (offset - 0x80) * 2 + shift / 4;
@@ -1730,6 +1762,12 @@ static const struct of_device_id ma35d1_pinctrl_of_match[] = {
 	{
 		.compatible = "nuvoton,ma35d1-pinctrl",
 	},
+	        {
+                .compatible = "nuvoton,ma35d0-pinctrl",
+        },
+	        {
+                .compatible = "nuvoton,ma35h0-pinctrl",
+        },
 	{}
 };
 

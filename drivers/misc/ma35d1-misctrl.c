@@ -28,7 +28,6 @@
 #define SET_CPU_FREQ_600M	0x1006
 #define SET_CPU_FREQ_650M	0x1007
 #define SET_CPU_FREQ_800M	0x1008
-#define SET_CPU_FREQ_1000M	0x1010
 #define GET_PMIC_VOLT		0x1101
 #define SET_PMIC_VOLT		0x1102
 #define SET_EPLL_DIV_BY_2	0x1202
@@ -76,10 +75,6 @@ static long ma35d1_misctrl_ioctl(struct file *file, unsigned int cmd, unsigned l
 
 	case SET_CPU_FREQ_800M:
 		arm_smccc_smc(MA35D1_SIP_CPU_CLK, 800, 0, 0, 0, 0, 0, 0, &res);
-		break;
-
-	case SET_CPU_FREQ_1000M:
-		arm_smccc_smc(MA35D1_SIP_CPU_CLK, 1000, 0, 0, 0, 0, 0, 0, &res);
 		break;
 
 	case GET_PMIC_VOLT:
@@ -204,6 +199,3 @@ module_platform_driver(ma35d1_misctrl_driver);
 MODULE_ALIAS("platform:ma35d1-misctrl");
 MODULE_DESCRIPTION("misctrl driver for Nuvoton MA35D1");
 MODULE_LICENSE("GPL v2");
-
-
-

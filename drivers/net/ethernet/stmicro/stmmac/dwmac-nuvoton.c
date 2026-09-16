@@ -158,7 +158,7 @@ static int nvt_gmac_probe(struct platform_device *pdev)
 		return PTR_ERR(plat_dat);
 
 	/* Nuvoton DWMAC configs */
-	//plat_dat->has_gmac = data->features; //schung
+	plat_dat->core_type = data->features;
 	plat_dat->tx_fifo_size = 2048;
 	plat_dat->rx_fifo_size = 4096;
 	plat_dat->multicast_filter_bins = 0;

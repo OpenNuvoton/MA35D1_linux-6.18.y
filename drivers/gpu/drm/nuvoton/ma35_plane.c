@@ -46,8 +46,8 @@ static uint32_t ma35_layer_formats[] = {
 };
 
 static uint32_t ma35_cursor_formats[] = {
+	DRM_FORMAT_ARGB8888,
 	DRM_FORMAT_XRGB8888,
-	/* MASK */
 };
 
 static struct ma35_plane_property ma35_plane_properties[] = {
@@ -254,9 +254,11 @@ static int ma35_plane_atomic_check(struct drm_plane *drm_plane,
 		return -EINVAL;
 
 	if (new_state->crtc_x < 0 || new_state->crtc_y < 0) {
-		drm_err(drm_dev,
-			"Negative on-CRTC positions are not supported.\n");
-		return -EINVAL;
+		drm_dbg(drm_dev,
+			"Clamping negative on-CRTC position (%d, %d) to (0, 0)\n",
+			new_state->crtc_x, new_state->crtc_y);
+		new_state->crtc_x = 0;
+		new_state->crtc_y = 0;
 	}
 
 	if (layer->config.blend_mode > MA35_ALPHA_XOR) {
@@ -308,7 +310,8 @@ static int ma35_cursor_plane_atomic_check(struct drm_plane *drm_plane,
 	if (WARN_ON(!crtc_state))
 		return -EINVAL;
 
-	if (fb->format->format != DRM_FORMAT_XRGB8888) {
+	if (fb->format->format != DRM_FORMAT_ARGB8888 &&
+	    fb->format->format != DRM_FORMAT_XRGB8888) {
 		drm_err(drm_dev, "Invalid cursor format\n");
 		return -EINVAL;
 	}
@@ -325,7 +328,7 @@ static int ma35_cursor_plane_atomic_check(struct drm_plane *drm_plane,
 }
 
 static int ma35_cursor_plane_atomic_async_check(struct drm_plane *drm_plane,
-				      struct drm_atomic_state *state)
+				      struct drm_atomic_state *state, bool flip)
 {
 	return ma35_cursor_plane_atomic_check(drm_plane, state);
 }
@@ -503,7 +506,7 @@ static void ma35_cursor_plane_atomic_async_update(struct drm_plane *drm_plane,
 	struct drm_framebuffer *old_fb = old_state->fb;
 	struct drm_framebuffer *new_fb = new_state->fb;
 
-	// update the current one with the new plane state
+	// update the current plane state in-place with the new values
 	old_state->crtc_x = new_state->crtc_x;
 	old_state->crtc_y = new_state->crtc_y;
 	old_state->crtc_h = new_state->crtc_h;
@@ -512,8 +515,8 @@ static void ma35_cursor_plane_atomic_async_update(struct drm_plane *drm_plane,
 	old_state->src_y = new_state->src_y;
 	old_state->src_h = new_state->src_h;
 	old_state->src_w = new_state->src_w;
-	// swap current and new framebuffers
-	swap(old_fb, new_fb);
+	// swap fb pointers between plane->state and new_state
+	swap(old_state->fb, new_state->fb);
 
 	if (!new_state->visible) {
 		regmap_update_bits(priv->regmap, MA35_CURSOR_CONFIG,
@@ -535,12 +538,17 @@ static void ma35_cursor_plane_atomic_async_update(struct drm_plane *drm_plane,
 }
 
 static void ma35_plane_atomic_disable(struct drm_plane *drm_plane,
-					 struct drm_atomic_state *state)
+				 struct drm_atomic_state *state)
 {
 	struct ma35_drm *priv = ma35_drm(drm_plane->dev);
 
-	regmap_update_bits(priv->regmap, MA35_FRAMEBUFFER_CONFIG,
-		MA35_PRIMARY_ENABLE, 0);
+	if (drm_plane->type == DRM_PLANE_TYPE_PRIMARY) {
+		regmap_update_bits(priv->regmap, MA35_FRAMEBUFFER_CONFIG,
+			MA35_PRIMARY_ENABLE, 0);
+	} else if (drm_plane->type == DRM_PLANE_TYPE_OVERLAY) {
+		regmap_update_bits(priv->regmap, MA35_OVERLAY_CONFIG,
+			MA35_OVERLAY_ENABLE, 0);
+	}
 }
 
 static void ma35_cursor_plane_atomic_disable(struct drm_plane *drm_plane,
@@ -637,6 +645,15 @@ static const struct drm_plane_funcs ma35_plane_funcs = {
 	.atomic_destroy_state	= drm_atomic_helper_plane_destroy_state,
 	.atomic_set_property = ma35_plane_set_property,
 	.atomic_get_property = ma35_plane_get_property,
+};
+
+static const struct drm_plane_funcs ma35_cursor_plane_funcs = {
+	.update_plane		= drm_atomic_helper_update_plane,
+	.disable_plane		= drm_atomic_helper_disable_plane,
+	.destroy		= drm_plane_cleanup,
+	.reset			= drm_atomic_helper_plane_reset,
+	.atomic_duplicate_state	= drm_atomic_helper_plane_duplicate_state,
+	.atomic_destroy_state	= drm_atomic_helper_plane_destroy_state,
 };
 
 static int ma35_layer_create_properties(struct ma35_drm *priv,
@@ -752,7 +769,7 @@ static int ma35_cursor_of_parse(struct ma35_drm *priv,
 	// just retrieve the default values
 	layer->formats = ma35_cursor_formats;
 	layer->config.depth = MA35_CURSOR_DEPTH; // no alpha
-	layer->config.fourcc = DRM_FORMAT_XRGB8888; // no other format
+	layer->config.fourcc = DRM_FORMAT_ARGB8888; // hardware uses A8R8G8B8 format
 
 	/* Hotspot properties created by cursor plane are not supported by v6.6,
 	 * so we parse them from device tree.
@@ -832,7 +849,7 @@ static int ma35_layer_create(struct ma35_drm *priv,
 	if (type == DRM_PLANE_TYPE_CURSOR) {
 		ret = drm_universal_plane_init(drm_dev, &layer->drm_plane,
 			1 << MA35_DEFAULT_CRTC_ID,
-			&ma35_plane_funcs, ma35_cursor_formats,
+			&ma35_cursor_plane_funcs, ma35_cursor_formats,
 			ARRAY_SIZE(ma35_cursor_formats), NULL, type, NULL);
 		if (ret) {
 			drm_err(drm_dev, "Failed to initialize layer plane\n");

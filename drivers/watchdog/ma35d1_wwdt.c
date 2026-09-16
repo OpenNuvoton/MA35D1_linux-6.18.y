@@ -21,8 +21,8 @@
 
 
 #define REG_WWDT_RLD		0x00		/* WWDT Reload Counter Register */
-#define REG_WWDT_CR		0x04		/* WWDT Control Register */
-#define REG_WWDT_SR		0x08		/* WWDT Status Register */
+#define REG_WWDT_CR			0x04		/* WWDT Control Register */
+#define REG_WWDT_SR			0x08		/* WWDT Status Register */
 #define REG_WWDT_CVR		0x0C		/* WWDT Counter Value Register */
 
 #define RELOAD_WORD	0x00005AA5
@@ -81,7 +81,7 @@ static const struct watchdog_info ma35d1wwdt_info = {
 	.options	= WDIOF_KEEPALIVEPING,
 };
 
-static struct watchdog_ops ma35d1wwdt_ops = {
+static const struct watchdog_ops ma35d1wwdt_ops = {
 	.owner = THIS_MODULE,
 	.start = ma35d1wwdt_start,
 	.stop = ma35d1wwdt_stop,
@@ -164,6 +164,7 @@ static void ma35d1wwdt_remove(struct platform_device *pdev)
 	/* You can check-out any time you like
 	 * But you can never leave!
 	 */
+
 }
 
 #ifdef CONFIG_PM
@@ -184,6 +185,8 @@ static int ma35d1wwdt_resume(struct platform_device *dev)
 
 static const struct of_device_id ma35d1_wwdt_of_match[] = {
 	{ .compatible = "nuvoton,ma35d1-wwdt" },
+	{ .compatible = "nuvoton,ma35d0-wwdt" },
+	{ .compatible = "nuvoton,ma35h0-wwdt" },
 	{},
 };
 MODULE_DEVICE_TABLE(of, ma35d1_wwdt_of_match);

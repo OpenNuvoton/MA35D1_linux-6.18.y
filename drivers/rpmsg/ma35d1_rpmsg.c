@@ -283,7 +283,8 @@ static void ma35d1_rpmsg_mbox_set(struct ma35d1_rpmsg_priv *priv)
 	}
 }
 
-struct ma35d1_rpmsg_priv *ma35d1_rpmsg_register(struct device *parent, struct device_node *node)
+static struct ma35d1_rpmsg_priv *ma35d1_rpmsg_register(struct device *parent,
+						       struct device_node *node)
 {
 	struct ma35d1_rpmsg_priv *priv;
 	struct ma35d1_rpmsg_device *ndev;
@@ -362,7 +363,6 @@ unregister_dev:
 	device_unregister(&priv->dev);
 	return ERR_PTR(ret);
 }
-EXPORT_SYMBOL(ma35d1_rpmsg_register);
 
 static int ma35d1_rpmsg_probe(struct platform_device *pdev)
 {

@@ -106,7 +106,7 @@ static void ma35_crtc_atomic_enable(struct drm_crtc *drm_crtc,
 		drm_atomic_get_new_crtc_state(state, drm_crtc);
 	struct drm_display_mode *mode = &new_state->adjusted_mode;
 	struct drm_color_lut *lut;
-	struct drm_connector *connector = &priv->interface->drm_connector;
+	struct drm_connector *connector = priv->interface->drm_connector;
 	struct drm_display_info *display_info = &connector->display_info;
 	int i, size;
 	u32 reg;
@@ -278,18 +278,6 @@ static void ma35_crtc_disable_vblank(struct drm_crtc *drm_crtc)
 	regmap_write(priv->regmap, MA35_DISPLAY_INTRENABLE, 0);
 }
 
-static u32 ma35_crtc_get_vblank_counter(struct drm_crtc *drm_crtc)
-{
-	struct ma35_drm *priv = ma35_drm(drm_crtc->dev);
-	u32 val;
-
-	spin_lock(&priv->crtc->vblank_lock);
-	val = priv->crtc->vblank_counter;
-	spin_unlock(&priv->crtc->vblank_lock);
-
-	return val;
-}
-
 static int ma35_crtc_gamma_set(struct drm_crtc *drm_crtc,
 		  u16 *r, u16 *g, u16 *b, uint32_t size,
 		  struct drm_modeset_acquire_ctx *ctx)
@@ -362,7 +350,6 @@ static const struct drm_crtc_funcs ma35_crtc_funcs = {
 	.atomic_destroy_state	= drm_atomic_helper_crtc_destroy_state,
 	.enable_vblank		= ma35_crtc_enable_vblank,
 	.disable_vblank		= ma35_crtc_disable_vblank,
-	.get_vblank_counter = ma35_crtc_get_vblank_counter,
 	.gamma_set      = ma35_crtc_gamma_set,
 	.atomic_set_property = ma35_crtc_atomic_set_property,
 	.atomic_get_property = ma35_crtc_atomic_get_property,
@@ -374,8 +361,6 @@ void ma35_crtc_vblank_handler(struct ma35_drm *priv)
 
 	if (!crtc)
 		return;
-
-	crtc->vblank_counter++;
 
 	drm_crtc_handle_vblank(&crtc->drm_crtc);
 }
@@ -429,7 +414,6 @@ int ma35_crtc_init(struct ma35_drm *priv)
 		return -ENOMEM;
 
 	priv->crtc = crtc;
-	crtc->vblank_counter = 0;
 
 	layer_primary = ma35_layer_get_from_type(priv, DRM_PLANE_TYPE_PRIMARY);
 	if (!layer_primary) {

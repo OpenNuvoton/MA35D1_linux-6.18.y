@@ -15,6 +15,7 @@
 #include <linux/interrupt.h>
 #include <linux/spinlock.h>
 #include <linux/scatterlist.h>
+#include <crypto/algapi.h>
 #include <crypto/scatterwalk.h>
 #include <linux/types.h>
 

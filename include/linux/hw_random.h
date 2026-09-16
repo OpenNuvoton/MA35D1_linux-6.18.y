@@ -43,6 +43,7 @@ struct hwrng {
 	int (*data_present)(struct hwrng *rng, int wait);
 	int (*data_read)(struct hwrng *rng, u32 *data);
 	int (*read)(struct hwrng *rng, void *data, size_t max, bool wait);
+	long (*ioctl)(struct hwrng *rng, unsigned int cmd, unsigned long arg);
 	unsigned long priv;
 	unsigned short quality;
 

@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config VIDEO_NUVOTON_VC8K
+	bool "Nuvoton VC8000 video decoder driver"
+	depends on (ARCH_MA35D1 || ARCH_MA35D0 || ARCH_MA35H0 || COMPILE_TEST)
+	default y
+	select VIDEO_DEV
+	select VIDEO_V4L2
+	select MEDIA_CONTROLLER
+	select VIDEOBUF2_DMA_CONTIG
+	select VIDEOBUF2_VMALLOC
+	select V4L2_MEM2MEM_DEV
+	help
+	  Enable the Nuvoton MA35 Series VC8000 H.264 and JPEG decoder.
+
+	  The open Linux interface is linked with a prebuilt VC8000 core and
+	  built directly into the kernel image.

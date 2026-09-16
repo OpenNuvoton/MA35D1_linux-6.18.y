@@ -83,7 +83,7 @@ static int ma35d1_tsen_get_temp(struct thermal_zone_device *th, int *temp)
 	regmap_write(sensor->regmap, REG_SYS_TSENSRFCR, reg);
 
 	reg  = (reg & TSEN_DATA) >> TSEN_DATA_SHIFT;
-	*temp = (reg * 27435 / 4096 - 9333) / 100;
+	*temp = (int)((long)reg * 274350 / 4096 - 93330);
 	sensor->last_jiffies = jiffies;
 	sensor->last_temp = *temp;
 	return 0;
@@ -118,6 +118,8 @@ static const struct thermal_zone_device_ops ma35d1_tz_ops = {
 
 static const struct of_device_id ma35d1_tsen_of_match[] = {
 	{ .compatible = "nuvoton,ma35d1-tsen" },
+	{ .compatible = "nuvoton,ma35d0-tsen" },
+	{ .compatible = "nuvoton,ma35h0-tsen" },
 	{}
 };
 MODULE_DEVICE_TABLE(of, ma35d1_tsen_of_match);
@@ -142,6 +144,10 @@ static int ma35d1_tsen_probe(struct platform_device *pdev)
 
 	/* Populate sensor */
 	sensor->regmap  = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "nuvoton,ma35d1-sys");
+	if (IS_ERR(sensor->regmap))
+		sensor->regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "nuvoton,ma35d0-sys");
+	if (IS_ERR(sensor->regmap))
+		sensor->regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "nuvoton,ma35h0-sys");
 	if (IS_ERR(sensor->regmap)) {
 		dev_err(&pdev->dev, "Failed to get SYS register base\n");
 		return -ENODEV;
@@ -174,14 +180,12 @@ static int ma35d1_tsen_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int ma35d1_tsen_remove(struct platform_device *pdev)
+static void ma35d1_tsen_remove(struct platform_device *pdev)
 {
 	struct ma35d1_tmperature_sensor *sensor = platform_get_drvdata(pdev);
 
 	ma35d1_tsen_power_off(sensor);
 	thermal_remove_hwmon_sysfs(sensor->th_dev);
-
-	return 0;
 }
 
 static struct platform_driver ma35d1_tsen_driver = {

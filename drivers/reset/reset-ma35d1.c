@@ -94,8 +94,25 @@ static const struct reset_control_ops ma35d1_reset_ops = {
 
 static const struct of_device_id ma35d1_reset_dt_ids[] = {
 	{ .compatible = "nuvoton,ma35d1-reset"},
+	{ .compatible = "nuvoton,ma35d0-reset"},
+	{ .compatible = "nuvoton,ma35h0-reset"},
 	{},
 };
+
+static struct regmap *ma35d1_reset_get_sys_regmap(struct device_node *np)
+{
+	struct regmap *regmap;
+
+	regmap = syscon_regmap_lookup_by_phandle(np, "nuvoton,ma35d1-sys");
+	if (!IS_ERR(regmap))
+		return regmap;
+
+	regmap = syscon_regmap_lookup_by_phandle(np, "nuvoton,ma35d0-sys");
+	if (!IS_ERR(regmap))
+		return regmap;
+
+	return syscon_regmap_lookup_by_phandle(np, "nuvoton,ma35h0-sys");
+}
 
 static int ma35d1_reset_probe(struct platform_device *pdev)
 {
@@ -117,15 +134,13 @@ static int ma35d1_reset_probe(struct platform_device *pdev)
 	if (!reboot_data)
 		return -ENOMEM;
 
-	reset_data->regmap  = syscon_regmap_lookup_by_phandle(pdev->dev.of_node,
-								"nuvoton,ma35d1-sys");
+	reset_data->regmap = ma35d1_reset_get_sys_regmap(pdev->dev.of_node);
 	if (IS_ERR(reset_data->regmap)) {
 		dev_err(&pdev->dev, "Failed to get SYS register base\n");
 		return -ENODEV;
 	}
 
-	reboot_data->regmap  = syscon_regmap_lookup_by_phandle(pdev->dev.of_node,
-								"nuvoton,ma35d1-sys");
+	reboot_data->regmap = ma35d1_reset_get_sys_regmap(pdev->dev.of_node);
 	if (IS_ERR(reboot_data->regmap)) {
 		dev_err(&pdev->dev, "Failed to get SYS register base\n");
 		return -ENODEV;

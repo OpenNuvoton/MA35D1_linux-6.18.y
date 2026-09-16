@@ -720,6 +720,30 @@ config STMP3XXX_RTC_WATCHDOG
 	  To compile this driver as a module, choose M here: the
 	  module will be called stmp3xxx_rtc_wdt.
 
+config MA35D1_WDT
+	tristate "Nuvoton MA35D1 Watchdog Timer"
+	depends on ARCH_MA35D1 || ARCH_MA35D0 || ARCH_MA35H0
+	select WATCHDOG_CORE
+	select MFD_SYSCON
+	default y
+	help
+	  Say Y here to include support for the watchdog timer
+	  for the Nuvoton MA35D1/MA35D0/MA35H0 series microprosser.
+	  To compile this driver as a module, choose M here: the
+	  module will be called ma35d1_wdt.
+
+config MA35D1_WWDT
+	tristate "Nuvoton MA35D1 Window Watchdog Timer"
+	depends on ARCH_MA35D1 || ARCH_MA35D0 || ARCH_MA35H0
+	select WATCHDOG_CORE
+	select MFD_SYSCON
+	default y
+	help
+	  Say Y here to include support for the window watchdog timer
+	  for the Nuvoton MA35D1/MA35D0/MA35H0 series MCU.
+	  To compile this driver as a module, choose M here: the
+	  module will be called ma35d1_wwdt.
+
 config TS4800_WATCHDOG
 	tristate "TS-4800 Watchdog"
 	depends on HAS_IOMEM && OF
@@ -2353,77 +2377,5 @@ config KEEMBAY_WATCHDOG
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called keembay_wdt.
-
-config MA35D1_WDT
-	tristate "Nuvoton MA35D1 Watchdog Timer"
-	depends on ARCH_MA35D1
-	select WATCHDOG_CORE
-	select MFD_SYSCON
-	default y
-	help
-	  Say Y here to include support for the watchdog timer
-	  for the Nuvoton MA35D1 series microprosser.
-	  To compile this driver as a module, choose M here: the
-	  module will be called ma35d1_wdt.
-
-config MA35D1_WWDT
-	tristate "Nuvoton MA35D1 Window Watchdog Timer"
-	depends on ARCH_MA35D1
-	select WATCHDOG_CORE
-	select MFD_SYSCON
-	default y
-	help
-	  Say Y here to include support for the window watchdog timer
-	  for the Nuvoton MA35D1 series MCU.
-	  To compile this driver as a module, choose M here: the
-	  module will be called ma35d1_wwdt.
-
-config MA35D0_WDT
-	tristate "Nuvoton MA35D0 Watchdog Timer"
-	depends on ARCH_MA35D0
-	select WATCHDOG_CORE
-	select MFD_SYSCON
-	default y
-	help
-	  Say Y here to include support for the watchdog timer
-	  for the Nuvoton MA35D0 series microprosser.
-	  To compile this driver as a module, choose M here: the
-	  module will be called ma35d0_wdt.
-
-config MA35D0_WWDT
-	tristate "Nuvoton MA35D0 Window Watchdog Timer"
-	depends on ARCH_MA35D0
-	select WATCHDOG_CORE
-	select MFD_SYSCON
-	default y
-	help
-	  Say Y here to include support for the window watchdog timer
-	  for the Nuvoton MA35D0 series MCU.
-	  To compile this driver as a module, choose M here: the
-	  module will be called ma35d0_wwdt.
-
-config MA35H0_WDT
-	tristate "Nuvoton MA35H0 Watchdog Timer"
-	depends on ARCH_MA35H0
-	select WATCHDOG_CORE
-	select MFD_SYSCON
-	default y
-	help
-	  Say Y here to include support for the watchdog timer
-	  for the Nuvoton MA35H0 series microprosser.
-	  To compile this driver as a module, choose M here: the
-	  module will be called ma35h0_wdt.
-
-config MA35H0_WWDT
-	tristate "Nuvoton MA35H0 Window Watchdog Timer"
-	depends on ARCH_MA35H0
-	select WATCHDOG_CORE
-	select MFD_SYSCON
-	default y
-	help
-	  Say Y here to include support for the window watchdog timer
-	  for the Nuvoton MA35H0 series MCU.
-	  To compile this driver as a module, choose M here: the
-	  module will be called ma35h0_wwdt.
 
 endif # WATCHDOG

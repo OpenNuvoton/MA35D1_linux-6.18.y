@@ -131,6 +131,8 @@ MODULE_ALIAS("platform:usb-ohci");
 #ifdef CONFIG_OF
 static const struct of_device_id ohci_hcd_ma35d1_match[] = {
 	{ .compatible = "nuvoton,ma35d1-ohci" },
+	{ .compatible = "nuvoton,ma35d0-ohci" },
+	{ .compatible = "nuvoton,ma35h0-ohci" },
 	{},
 };
 MODULE_DEVICE_TABLE(of, ohci_hcd_ma35d1_match);

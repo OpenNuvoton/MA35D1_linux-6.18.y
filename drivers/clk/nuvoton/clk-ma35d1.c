@@ -219,9 +219,7 @@ static int ma35d1_clocks_probe(struct platform_device *pdev)
 	ma35d1_hw_data->num = MA35D1_CLK_MAX_IDX;
 	hws = ma35d1_hw_data->hws;
 
-	clk_node = of_find_compatible_node(NULL, NULL, "nuvoton,ma35d1-clk");
 	clk_base = of_iomap(clk_node, 0);
-	of_node_put(clk_node);
 	if (!clk_base) {
 		pr_err("%s: could not map region\n", __func__);
 		return -ENOMEM;
@@ -793,7 +791,10 @@ static int ma35d1_clocks_probe(struct platform_device *pdev)
 
 	/* ADC */
 	hws[ADC_DIV] = ma35d1_reg_adc_clkdiv(dev, "adc_div", "pclk0", 0,
-		clk_base + REG_CLK_CLKDIV4, 4, 17, 0);
+		clk_base + REG_CLK_CLKDIV4, 4, 17);
+	if (IS_ERR(hws[ADC_DIV]))
+		dev_err(dev, "failed to register adc_div: %ld\n",
+			PTR_ERR(hws[ADC_DIV]));
 	hws[ADC_GATE] = ma35d1_clk_gate("adc_gate", "adc_div",
 		clk_base + REG_CLK_APBCLK2, 24);
 
@@ -817,6 +818,8 @@ static int ma35d1_clocks_probe(struct platform_device *pdev)
 
 static const struct of_device_id ma35d1_clk_of_match[] = {
 	{.compatible = "nuvoton,ma35d1-clk"},
+	{.compatible = "nuvoton,ma35d0-clk"},
+	{.compatible = "nuvoton,ma35h0-clk"},
 	{},
 };
 MODULE_DEVICE_TABLE(of, ma35d1_clk_of_match);

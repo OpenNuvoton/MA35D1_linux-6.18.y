@@ -11,11 +11,14 @@
 
 #include "m_can.h"
 
+#define REG_READ_TIME 20
+
 struct m_can_plat_priv {
 	struct m_can_classdev cdev;
 
 	void __iomem *base;
 	void __iomem *mram_base;
+	spinlock_t lock;
 };
 
 static inline struct m_can_plat_priv *cdev_to_priv(struct m_can_classdev *cdev)
@@ -27,7 +30,33 @@ static u32 iomap_read_reg(struct m_can_classdev *cdev, int reg)
 {
 	struct m_can_plat_priv *priv = cdev_to_priv(cdev);
 
-	return readl(priv->base + reg);
+	if (cdev->nvt_soc_version == 0) {
+		u32 u32ReadReg = 0x0;
+		u32 u32ReadReg_1 = 0x0;
+		u32 u32TimeOutCnt = 0x0;
+		unsigned long flags;
+
+		spin_lock_irqsave(&priv->lock, flags);
+
+		u32ReadReg = readl(priv->base + reg);
+
+		do {
+			u32ReadReg_1 = readl(priv->base + reg);
+
+			if (u32ReadReg == u32ReadReg_1) {
+				u32TimeOutCnt++;
+			} else {
+				u32ReadReg = u32ReadReg_1;
+				u32TimeOutCnt = 0;
+			}
+
+		} while (u32TimeOutCnt < REG_READ_TIME);
+
+		spin_unlock_irqrestore(&priv->lock, flags);
+
+		return u32ReadReg;
+	} else
+		return readl(priv->base + reg);
 }
 
 static int iomap_read_fifo(struct m_can_classdev *cdev, int offset, void *val, size_t val_count)
@@ -84,6 +113,7 @@ static int m_can_plat_probe(struct platform_device *pdev)
 	void __iomem *mram_addr;
 	struct phy *transceiver;
 	int irq = 0, ret = 0;
+	void __iomem *reg;
 
 	mcan_class = m_can_class_allocate_dev(&pdev->dev,
 					      sizeof(struct m_can_plat_priv));
@@ -95,6 +125,8 @@ static int m_can_plat_probe(struct platform_device *pdev)
 	ret = m_can_class_get_clocks(mcan_class);
 	if (ret)
 		goto probe_fail;
+
+	spin_lock_init(&priv->lock);
 
 	addr = devm_platform_ioremap_resource_byname(pdev, "m_can");
 	if (IS_ERR(addr)) {
@@ -147,6 +179,21 @@ static int m_can_plat_probe(struct platform_device *pdev)
 	mcan_class->ops = &m_can_plat_ops;
 
 	mcan_class->is_peripheral = false;
+
+	reg = ioremap(0x404601f0, 0x10);
+	if (!reg)
+		dev_info(
+			&pdev->dev,
+			"Error: couldn't map product number and revision register !!\n");
+	else
+		ret = readl(reg) & 0xf000000;
+
+	if (ret == 0)
+		mcan_class->nvt_soc_version = 0;
+	else
+		mcan_class->nvt_soc_version = 1;
+
+	iounmap(reg);
 
 	platform_set_drvdata(pdev, mcan_class);
 

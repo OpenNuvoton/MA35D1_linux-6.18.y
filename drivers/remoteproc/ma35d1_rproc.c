@@ -93,7 +93,7 @@ static void *ma35d1_m4_rproc_da_to_va_ddr(struct rproc *rproc, u64 da, int len)
 	return va;
 }
 
-int ma35d1_rproc_elf_load_segments(struct rproc *rproc, const struct firmware *fw)
+static int ma35d1_rproc_elf_load_segments(struct rproc *rproc, const struct firmware *fw)
 {
 	struct ma35d1_rproc *nproc = rproc->priv;
 	struct device *dev = &rproc->dev;

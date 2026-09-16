@@ -18,20 +18,20 @@
 #define to_ma35d1_clk_pll(clk) \
 	(container_of(clk, struct ma35d1_clk_pll, clk))
 
-#define PLL0CTL0_FBDIV_MSK		GENMASK(7, 0)
-#define PLL0CTL0_INDIV_MSK		GENMASK(11, 8)
-#define PLL0CTL0_OUTDIV_MSK		GENMASK(13, 12)
-#define PLL0CTL0_PD_MSK			BIT(16)
-#define PLL0CTL0_BP_MSK			BIT(17)
-#define PLLXCTL0_FBDIV_MSK		GENMASK(10, 0)
-#define PLLXCTL0_INDIV_MSK		GENMASK(17, 12)
-#define PLLXCTL0_MODE_MSK		GENMASK(19, 18)
-#define PLLXCTL0_SSRATE_MSK		GENMASK(30, 20)
-#define PLLXCTL1_PD_MSK			BIT(0)
-#define PLLXCTL1_BP_MSK			BIT(1)
-#define PLLXCTL1_OUTDIV_MSK		GENMASK(6, 4)
-#define PLLXCTL1_FRAC_MSK		GENMASK(31, 8)
-#define PLLXCTL2_SLOPE_MSK		GENMASK(23, 0)
+#define PLL0CTL0_FBDIV_MSK	GENMASK(7, 0)
+#define PLL0CTL0_INDIV_MSK	GENMASK(11, 8)
+#define PLL0CTL0_OUTDIV_MSK	GENMASK(13, 12)
+#define PLL0CTL0_PD_MSK		BIT(16)
+#define PLL0CTL0_BP_MSK		BIT(17)
+#define PLLXCTL0_FBDIV_MSK	GENMASK(10, 0)
+#define PLLXCTL0_INDIV_MSK	GENMASK(17, 12)
+#define PLLXCTL0_MODE_MSK	GENMASK(19, 18)
+#define PLLXCTL0_SSRATE_MSK	GENMASK(30, 20)
+#define PLLXCTL1_PD_MSK		BIT(0)
+#define PLLXCTL1_BP_MSK		BIT(1)
+#define PLLXCTL1_OUTDIV_MSK	GENMASK(6, 4)
+#define PLLXCTL1_FRAC_MSK	GENMASK(31, 8)
+#define PLLXCTL2_SLOPE_MSK	GENMASK(23, 0)
 
 struct ma35d1_clk_pll {
 	struct clk_hw hw;
@@ -79,8 +79,8 @@ static void CLK_LockReg(struct ma35d1_clk_pll *pll)
 }
 
 /* SMIC PLL for CAPLL */
-unsigned long CLK_GetPLLFreq_SMICPLL(struct ma35d1_clk_pll *pll,
-				     unsigned long PllSrcClk)
+static unsigned long CLK_GetPLLFreq_SMICPLL(struct ma35d1_clk_pll *pll,
+					    unsigned long PllSrcClk)
 {
 	u32 u32M, u32N, u32P, u32OutDiv;
 	u32 val;
@@ -105,8 +105,8 @@ unsigned long CLK_GetPLLFreq_SMICPLL(struct ma35d1_clk_pll *pll,
 }
 
 /* VSI-PLL: INTEGER_MODE */
-unsigned long CLK_CalPLLFreq_Mode0(unsigned long PllSrcClk, unsigned long u64PllFreq,
-				   u32 *u32Reg)
+static unsigned long CLK_CalPLLFreq_Mode0(unsigned long PllSrcClk,
+					  unsigned long u64PllFreq, u32 *u32Reg)
 {
 	u32 u32TmpM, u32TmpN, u32TmpP;
 	u32 u32RngMinN, u32RngMinM, u32RngMinP;
@@ -247,8 +247,8 @@ search_done:
 	return fclko_best * 1000;
 }
 
-unsigned long CLK_SetPLLFreq(struct ma35d1_clk_pll *pll, unsigned long PllSrcClk,
-			     unsigned long u64PllFreq)
+static unsigned long CLK_SetPLLFreq(struct ma35d1_clk_pll *pll, unsigned long PllSrcClk,
+				    unsigned long u64PllFreq)
 {
 	u32 u32Reg[3] = { 0 }, val_ctl0, val_ctl1, val_ctl2;
 	unsigned long u64PllClk;
@@ -281,7 +281,8 @@ unsigned long CLK_SetPLLFreq(struct ma35d1_clk_pll *pll, unsigned long PllSrcClk
 	return u64PllClk;
 }
 
-unsigned long CLK_GetPLLFreq_VSIPLL(struct ma35d1_clk_pll *pll, unsigned long PllSrcClk)
+static unsigned long CLK_GetPLLFreq_VSIPLL(struct ma35d1_clk_pll *pll,
+					   unsigned long PllSrcClk)
 {
 	u32 u32M, u32N, u32P, u32X, u32SR, u32FMOD;
 	u32 val_ctl0, val_ctl1, val_ctl2;

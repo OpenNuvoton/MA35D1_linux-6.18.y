@@ -31,8 +31,6 @@ struct ma35_crtc {
 	struct drm_property *dpi_format_prop;
 	struct drm_property *dither_depth_prop;
 	struct drm_property *dither_enable_prop;
-	spinlock_t vblank_lock;
-	u32 vblank_counter;
 	u32 dpi_format;
 	u16 dither_depth;
 	bool dither_enable;

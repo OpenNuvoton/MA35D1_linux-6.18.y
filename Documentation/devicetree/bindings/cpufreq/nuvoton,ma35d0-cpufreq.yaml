@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/cpufreq/nuvoton,ma35d0-cpufreq.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35D0 CPUFreq Driver
+
+maintainers:
+  - Nuvoton Technology Corporation <cwweng@nuvoton.com>
+
+description: |
+  CPU frequency scaling driver for the Nuvoton MA35D0 SoC.
+
+  The driver controls CPU frequency through Secure Monitor Calls (SMC)
+  and accesses the MA35D0 clock controller through syscon.
+
+properties:
+  compatible:
+    const: nuvoton,ma35d0-cpufreq
+
+required:
+  - compatible
+
+additionalProperties: false
+
+examples:
+  - |
+    cpufreq {
+        compatible = "nuvoton,ma35d0-cpufreq";
+    };
+
+...
+

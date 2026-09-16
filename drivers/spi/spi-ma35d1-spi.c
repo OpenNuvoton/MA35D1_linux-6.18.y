@@ -1,783 +1,1071 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (c) 2025 Nuvoton Technology Corp.
+ * Nuvoton MA35 Series SPI controller driver
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
+ * Copyright (c) 2026 Nuvoton Technology Corp.
  */
 
+#include <linux/bitfield.h>
+#include <linux/bits.h>
 #include <linux/clk.h>
-#include <linux/io.h>
+#include <linux/completion.h>
+#include <linux/device.h>
+#include <linux/dmaengine.h>
 #include <linux/iopoll.h>
+#include <linux/math64.h>
 #include <linux/module.h>
+#include <linux/platform_data/dma-ma35d1.h>
 #include <linux/platform_device.h>
-#include <linux/pm_runtime.h>
+#include <linux/property.h>
+#include <linux/reset.h>
+#include <linux/scatterlist.h>
 #include <linux/spi/spi.h>
-#include <linux/spi/spi-mem.h>
-#include <linux/wait.h>
+#include <linux/spinlock.h>
+#include <linux/unaligned.h>
 
-#include <linux/interrupt.h>
-#include <linux/of.h>
-#include <asm/irq.h>
+/* SPI register offsets */
+#define MA35_SPI_CTL			0x00
+#define MA35_SPI_CLKDIV			0x04
+#define MA35_SPI_SSCTL			0x08
+#define MA35_SPI_PDMACTL		0x0c
+#define MA35_SPI_FIFOCTL		0x10
+#define MA35_SPI_STATUS			0x14
+#define MA35_SPI_TX			0x20
+#define MA35_SPI_RX			0x30
 
-/* spi registers offset */
-#define REG_CTL         0x00
-#define REG_CLKDIV      0x04
-#define REG_SSCTL       0x08
-#define REG_PDMACTL     0x0C
-#define REG_FIFOCTL     0x10
-#define REG_STATUS      0x14
-#define REG_STATUS2     0x18
-#define REG_TX          0x20
-#define REG_RX          0x30
-#define REG_INTERNAL    0x48
+/* SPI Control Register */
+#define MA35_SPI_CTL_DATDIR		BIT(20)
+#define MA35_SPI_CTL_REORDER		BIT(19)
+#define MA35_SPI_CTL_SLAVE		BIT(18)
+#define MA35_SPI_CTL_UNITIEN		BIT(17)
+#define MA35_SPI_CTL_RXONLY		BIT(15)
+#define MA35_SPI_CTL_HALFDPX		BIT(14)
+#define MA35_SPI_CTL_LSB		BIT(13)
+#define MA35_SPI_CTL_DWIDTH_MASK	GENMASK(12, 8)
+#define MA35_SPI_CTL_SUSPITV_MASK	GENMASK(7, 4)
+#define MA35_SPI_CTL_CLKPOL		BIT(3)
+#define MA35_SPI_CTL_TXNEG		BIT(2)
+#define MA35_SPI_CTL_RXNEG		BIT(1)
+#define MA35_SPI_CTL_SPIEN		BIT(0)
 
-/* spi register bit */
-#define DATDIR          (0x01 << 20)
-#define UNITIEN         (0x01 << 17)
-#define TXNEG           (0x01 << 2)
-#define RXNEG           (0x01 << 1)
-#define LSB             (0x01 << 13)
-#define SELECTLEV       (0x01 << 2)
-#define SELECTPOL       (0x01 << 3)
-#define SELECTSLAVE0    0x01
-#define SELECTSLAVE1    0x02
-#define SPIEN           0x01
-#define DWIDTH_MASK     0x1F00
-#define DWIDTH_POS      8
-#define BYTE_REORDER    0x80000
-#define TXPDMAEN        0x01
-#define RXPDMAEN        0x02
-#define RXRST           0x01
-#define TXRST           0x02
-#define RXFBCLR         0x100
-#define TXFBCLR         0x200
-#define BUSY            0x01
-#define UNITIF          0x02
-#define RXEMPTY         0x100
-#define RXFULL          0x200
-#define SPIENSTS        0x8000
-#define TXEMPTY         0x10000
-#define TXFULL          0x20000
-#define FIFOCLR         0x400000
-#define TXRXRST         0x800000
+/* SPI Clock Divider Register */
+#define MA35_SPI_CLKDIV_MASK		GENMASK(8, 0)
+#define MA35_SPI_MIN_DIVISOR		2U
+#define MA35_SPI_MAX_DIVISOR		512U
 
-#define OP_BUSW_1	0
-#define OP_BUSW_2	1
-#define OP_BUSW_4	2
+/* SPI Slave Select Control Register */
+#define MA35_SPI_SSCTL_SS0		BIT(0)
+#define MA35_SPI_SSCTL_SS1		BIT(1)
+#define MA35_SPI_SSCTL_SSACTPOL		BIT(2)
+#define MA35_SPI_SSCTL_AUTOSS		BIT(3)
+#define MA35_SPI_SSCTL_SLV3WIRE		BIT(4)
+#define MA35_SPI_SSCTL_SLVBEIEN		BIT(8)
+#define MA35_SPI_SSCTL_SLVURIEN		BIT(9)
+#define MA35_SPI_SSCTL_SSACTIEN		BIT(12)
+#define MA35_SPI_SSCTL_SSINAIEN		BIT(13)
 
-/* define for PDMA */
-#define ALIGNMENT_4     4
-#define USE_PDMA_LEN    100
+/* SPI PDMA Control Register */
+#define MA35_SPI_PDMACTL_TXPDMAEN	BIT(0)
+#define MA35_SPI_PDMACTL_RXPDMAEN	BIT(1)
 
-#define SPI_GENERAL_TIMEOUT_MS	1000
+/* SPI FIFO Control Register */
+#define MA35_SPI_FIFOCTL_SLVBERX	BIT(10)
+#define MA35_SPI_FIFOCTL_TXUFIEN	BIT(7)
+#define MA35_SPI_FIFOCTL_TXUFPOL	BIT(6)
+#define MA35_SPI_FIFOCTL_RXOVIEN	BIT(5)
+#define MA35_SPI_FIFOCTL_RXTOIEN	BIT(4)
+#define MA35_SPI_FIFOCTL_TXTHIEN	BIT(3)
+#define MA35_SPI_FIFOCTL_RXTHIEN	BIT(2)
+#define MA35_SPI_FIFOCTL_TXRST		BIT(1)
+#define MA35_SPI_FIFOCTL_RXRST		BIT(0)
 
-struct nuvoton_spi_info {
-	unsigned int num_cs;
-	unsigned int lsb;
-	unsigned int txneg;
-	unsigned int rxneg;
-	unsigned int divider;
-	unsigned int sleep;
-	unsigned int txbitlen;
-	unsigned int clkpol;
-	int bus_num;
-	unsigned int spimode;
-	unsigned int hz;
-	unsigned int mrxphase;
+/* SPI Status Register */
+#define MA35_SPI_STATUS_TXRXRST		BIT(23)
+#define MA35_SPI_STATUS_TXFULL		BIT(17)
+#define MA35_SPI_STATUS_TXEMPTY		BIT(16)
+#define MA35_SPI_STATUS_SPIENSTS	BIT(15)
+#define MA35_SPI_STATUS_RXEMPTY		BIT(8)
+#define MA35_SPI_STATUS_BUSY		BIT(0)
+
+#define MA35_SPI_MAX_NATIVE_CS		2U
+#define MA35_SPI_DEFAULT_NUM_CS		2U
+#define MA35_SPI_DEFAULT_BPW		8U
+#define MA35_SPI_MAX_SPEED_HZ		100000000U
+#define MA35_SPI_POLL_TIMEOUT_US	10000U
+#define MA35_SPI_DMA_MIN_BYTES		64U
+#define MA35_SPI_MAX_DMA_SEGMENT	0x10000U
+
+struct ma35_spi {
+	struct device *dev;
+	void __iomem *regs;
+	struct clk *clk;
+	dma_addr_t phys_base;
+
+	/* Protects read-modify-write accesses to SSCTL. */
+	spinlock_t ssctl_lock;
+
+	struct dma_chan *dma_tx;
+	struct dma_chan *dma_rx;
+	struct ma35d1_peripheral tx_peripheral;
+	struct ma35d1_peripheral rx_peripheral;
+	struct completion dma_tx_done;
+	struct completion dma_rx_done;
 };
 
-struct nuvoton_spi {
-	struct completion               txdone;
-	struct completion               rxdone;
-	void __iomem                    *regs;
-	int                             irq;
-	unsigned int                    len;
-	unsigned int                    count;
-	const void                      *tx;
-	void                            *rx;
-	struct clk                      *clk;
-	struct spi_controller           *host;
-	struct device                   *dev;
-	struct nuvoton_spi_info	*pdata;
-	struct mutex                    mutex_lock;
-	spinlock_t                      lock;
-	struct resource                 *res;
-	int                             slave_txdone_state;
-	int                             slave_rxdone_state;
-	struct wait_queue_head          slave_txdone;
-	struct wait_queue_head          slave_rxdone;
-	unsigned int                    phyaddr;
-	unsigned int			cur_speed_hz;
-};
-
-static int nuvoton_spi_clk_enable(struct nuvoton_spi *nuvoton)
+static u32 ma35_spi_read(struct ma35_spi *hw, u32 reg)
 {
+	return readl(hw->regs + reg);
+}
+
+static void ma35_spi_write(struct ma35_spi *hw, u32 reg, u32 val)
+{
+	writel(val, hw->regs + reg);
+}
+
+static void ma35_spi_update_bits(struct ma35_spi *hw, u32 reg,
+				 u32 mask, u32 val)
+{
+	u32 tmp;
+
+	tmp = ma35_spi_read(hw, reg);
+	tmp &= ~mask;
+	tmp |= val & mask;
+	ma35_spi_write(hw, reg, tmp);
+}
+
+static void ma35_spi_update_ssctl_bits(struct ma35_spi *hw,
+				       u32 mask, u32 val)
+{
+	unsigned long flags;
+	u32 tmp;
+
+	spin_lock_irqsave(&hw->ssctl_lock, flags);
+	tmp = ma35_spi_read(hw, MA35_SPI_SSCTL);
+	tmp &= ~mask;
+	tmp |= val & mask;
+	ma35_spi_write(hw, MA35_SPI_SSCTL, tmp);
+	spin_unlock_irqrestore(&hw->ssctl_lock, flags);
+}
+
+static int ma35_spi_disable(struct ma35_spi *hw)
+{
+	u32 val;
+
+	ma35_spi_update_bits(hw, MA35_SPI_CTL, MA35_SPI_CTL_SPIEN, 0);
+
+	return readl_poll_timeout(hw->regs + MA35_SPI_STATUS, val,
+				  !(val & MA35_SPI_STATUS_SPIENSTS),
+				  1, MA35_SPI_POLL_TIMEOUT_US);
+}
+
+static int ma35_spi_enable(struct ma35_spi *hw)
+{
+	u32 val;
+
+	ma35_spi_update_bits(hw, MA35_SPI_CTL, MA35_SPI_CTL_SPIEN,
+			       MA35_SPI_CTL_SPIEN);
+
+	return readl_poll_timeout(hw->regs + MA35_SPI_STATUS, val,
+				  val & MA35_SPI_STATUS_SPIENSTS,
+				  1, MA35_SPI_POLL_TIMEOUT_US);
+}
+
+static int ma35_spi_wait_idle(struct ma35_spi *hw)
+{
+	u32 val;
+
+	return readl_poll_timeout(hw->regs + MA35_SPI_STATUS, val,
+				  !(val & MA35_SPI_STATUS_BUSY) &&
+				  (val & MA35_SPI_STATUS_TXEMPTY) &&
+				  (val & MA35_SPI_STATUS_RXEMPTY),
+				  1, MA35_SPI_POLL_TIMEOUT_US);
+}
+
+static int ma35_spi_wait_tx_not_full(struct ma35_spi *hw)
+{
+	u32 val;
+
+	return readl_poll_timeout(hw->regs + MA35_SPI_STATUS, val,
+				  !(val & MA35_SPI_STATUS_TXFULL),
+				  0, MA35_SPI_POLL_TIMEOUT_US);
+}
+
+static int ma35_spi_wait_rx_not_empty(struct ma35_spi *hw)
+{
+	u32 val;
+
+	return readl_poll_timeout(hw->regs + MA35_SPI_STATUS, val,
+				  !(val & MA35_SPI_STATUS_RXEMPTY),
+				  0, MA35_SPI_POLL_TIMEOUT_US);
+}
+
+static int ma35_spi_reset_fifo(struct ma35_spi *hw)
+{
+	u32 val;
+
+	ma35_spi_update_bits(hw, MA35_SPI_FIFOCTL,
+			       MA35_SPI_FIFOCTL_TXRST | MA35_SPI_FIFOCTL_RXRST,
+			       MA35_SPI_FIFOCTL_TXRST | MA35_SPI_FIFOCTL_RXRST);
+
+	/* Allow the reset request to be latched before polling status. */
+	udelay(1);
+
+	return readl_poll_timeout(hw->regs + MA35_SPI_STATUS, val,
+				  !(val & MA35_SPI_STATUS_TXRXRST),
+				  1, MA35_SPI_POLL_TIMEOUT_US);
+}
+
+static int ma35_spi_calc_divisor(unsigned long clk_rate, u32 speed_hz,
+				 unsigned int *divisor)
+{
+	unsigned int div;
+
+	if (!speed_hz)
+		return -EINVAL;
+
+	div = DIV_ROUND_UP(clk_rate, speed_hz);
+	div = max(div, MA35_SPI_MIN_DIVISOR);
+
+	/* CLKDIV encodes an odd value, i.e. an even clock divisor. */
+	if (div & 1)
+		div++;
+
+	if (div > MA35_SPI_MAX_DIVISOR)
+		return -EINVAL;
+
+	*divisor = div;
+
+	return 0;
+}
+
+static int ma35_spi_set_speed(struct ma35_spi *hw,
+			      struct spi_transfer *xfer, u32 speed_hz)
+{
+	unsigned long clk_rate;
+	unsigned int divisor;
+	u32 clkdiv;
 	int ret;
 
-	ret = clk_prepare_enable(nuvoton->clk);
+	clk_rate = clk_get_rate(hw->clk);
+	if (!clk_rate)
+		return -EINVAL;
+
+	ret = ma35_spi_calc_divisor(clk_rate, speed_hz, &divisor);
+	if (ret)
+		return ret;
+
+	clkdiv = divisor - 1;
+	ma35_spi_update_bits(hw, MA35_SPI_CLKDIV, MA35_SPI_CLKDIV_MASK,
+			       FIELD_PREP(MA35_SPI_CLKDIV_MASK, clkdiv));
+
+	xfer->effective_speed_hz = clk_rate / divisor;
+
+	return 0;
+}
+
+static unsigned int ma35_spi_word_bytes(u8 bpw)
+{
+	if (bpw <= 8)
+		return 1;
+	if (bpw <= 16)
+		return 2;
+
+	return 4;
+}
+
+static int ma35_spi_configure_transfer(struct ma35_spi *hw,
+				       struct spi_device *spi,
+				       struct spi_transfer *xfer,
+				       u8 *bits_per_word)
+{
+	u32 speed_hz = xfer->speed_hz ?: spi->max_speed_hz;
+	u8 bpw = xfer->bits_per_word ?: spi->bits_per_word;
+	u32 ctl_mask;
+	u32 dwidth;
+	u32 ctl = 0;
+	int ret;
+
+	if (!bpw)
+		bpw = MA35_SPI_DEFAULT_BPW;
+
+	if (bpw < 8 || bpw > 32)
+		return -EINVAL;
+
+	if (xfer->len % ma35_spi_word_bytes(bpw))
+		return -EINVAL;
+
+	ret = ma35_spi_wait_idle(hw);
+	if (ret) {
+		dev_err(hw->dev, "controller did not become idle\n");
+		return ret;
+	}
+
+	ret = ma35_spi_disable(hw);
+	if (ret) {
+		dev_err(hw->dev, "failed to disable controller\n");
+		return ret;
+	}
+
+	ret = ma35_spi_set_speed(hw, xfer, speed_hz);
+	if (ret) {
+		dev_err(hw->dev, "unsupported SPI clock %u Hz\n", speed_hz);
+		return ret;
+	}
+
+	ctl_mask = MA35_SPI_CTL_DATDIR |
+		   MA35_SPI_CTL_REORDER |
+		   MA35_SPI_CTL_SLAVE |
+		   MA35_SPI_CTL_UNITIEN |
+		   MA35_SPI_CTL_RXONLY |
+		   MA35_SPI_CTL_HALFDPX |
+		   MA35_SPI_CTL_LSB |
+		   MA35_SPI_CTL_DWIDTH_MASK |
+		   MA35_SPI_CTL_CLKPOL |
+		   MA35_SPI_CTL_TXNEG |
+		   MA35_SPI_CTL_RXNEG;
+
+	dwidth = bpw == 32 ? 0 : bpw;
+	ctl |= FIELD_PREP(MA35_SPI_CTL_DWIDTH_MASK, dwidth);
+
+	if (spi->mode & SPI_CPOL)
+		ctl |= MA35_SPI_CTL_CLKPOL;
+
+	/*
+	 * Mode 0/3: transmit on falling edge and receive on rising edge.
+	 * Mode 1/2: transmit on rising edge and receive on falling edge.
+	 */
+	if (!!(spi->mode & SPI_CPOL) == !!(spi->mode & SPI_CPHA))
+		ctl |= MA35_SPI_CTL_TXNEG;
+	else
+		ctl |= MA35_SPI_CTL_RXNEG;
+
+	if (spi->mode & SPI_LSB_FIRST)
+		ctl |= MA35_SPI_CTL_LSB;
+
+	ma35_spi_update_bits(hw, MA35_SPI_CTL, ctl_mask, ctl);
+
+	ret = ma35_spi_reset_fifo(hw);
+	if (ret) {
+		dev_err(hw->dev, "FIFO reset timed out\n");
+		return ret;
+	}
+
+	*bits_per_word = bpw;
+
+	return 0;
+}
+
+static u32 ma35_spi_get_tx_word(const void *txbuf, unsigned int offset,
+				unsigned int bytes_per_word)
+{
+	if (!txbuf)
+		return 0;
+
+	switch (bytes_per_word) {
+	case 1:
+		return ((const u8 *)txbuf)[offset];
+	case 2:
+		return get_unaligned((const u16 *)((const u8 *)txbuf + offset));
+	case 4:
+		return get_unaligned((const u32 *)((const u8 *)txbuf + offset));
+	default:
+		return 0;
+	}
+}
+
+static void ma35_spi_put_rx_word(void *rxbuf, unsigned int offset,
+				 unsigned int bytes_per_word, u32 val)
+{
+	if (!rxbuf)
+		return;
+
+	switch (bytes_per_word) {
+	case 1:
+		((u8 *)rxbuf)[offset] = val;
+		break;
+	case 2:
+		put_unaligned((u16)val, (u16 *)((u8 *)rxbuf + offset));
+		break;
+	case 4:
+		put_unaligned(val, (u32 *)((u8 *)rxbuf + offset));
+		break;
+	}
+}
+
+static int ma35_spi_pio_transfer(struct ma35_spi *hw,
+				 struct spi_transfer *xfer, u8 bpw)
+{
+	unsigned int bytes_per_word = ma35_spi_word_bytes(bpw);
+	u32 data_mask = U32_MAX;
+	unsigned int offset;
+	u32 val;
+	int ret;
+
+	if (bpw < 32)
+		data_mask = GENMASK(bpw - 1, 0);
+
+	/*
+	 * The controller is full duplex. TX-only transfers still generate RX
+	 * data which must be drained, while RX-only transfers require dummy TX
+	 * words to provide the serial clock.
+	 */
+	for (offset = 0; offset < xfer->len; offset += bytes_per_word) {
+		ret = ma35_spi_wait_tx_not_full(hw);
+		if (ret) {
+			dev_err(hw->dev, "TX FIFO full timeout\n");
+			return ret;
+		}
+
+		val = ma35_spi_get_tx_word(xfer->tx_buf, offset, bytes_per_word);
+		ma35_spi_write(hw, MA35_SPI_TX, val & data_mask);
+
+		ret = ma35_spi_wait_rx_not_empty(hw);
+		if (ret) {
+			dev_err(hw->dev, "RX FIFO empty timeout\n");
+			return ret;
+		}
+
+		val = ma35_spi_read(hw, MA35_SPI_RX) & data_mask;
+		ma35_spi_put_rx_word(xfer->rx_buf, offset, bytes_per_word, val);
+	}
+
+	ret = ma35_spi_wait_idle(hw);
+	if (ret)
+		dev_err(hw->dev, "PIO transfer did not complete\n");
 
 	return ret;
 }
 
-static void nuvoton_spi_clk_disable(struct nuvoton_spi *nuvoton)
+static enum dma_slave_buswidth ma35_spi_dma_width(u8 bpw)
 {
-	clk_disable_unprepare(nuvoton->clk);
-}
-
-static inline void nuvoton_set_divider(struct nuvoton_spi *hw)
-{
-	__raw_writel(hw->pdata->divider, hw->regs + REG_CLKDIV);
-}
-
-static int nuvoton_spi_clk_setup(struct nuvoton_spi *hw, unsigned long freq)
-{
-	unsigned int clk;
-	unsigned int div;
-
-	//clk = clk_get_rate(hw->clk);
-	clk = 180000000;
-	div = DIV_ROUND_UP(clk, freq) - 1;
-	hw->pdata->hz = freq;
-	hw->pdata->divider = div;
-
-	nuvoton_set_divider(hw);
-
-	return 0;
-}
-
-static inline void nuvoton_setup_txbitlen(struct nuvoton_spi *hw,
-        unsigned int txbitlen)
-{
-	unsigned int val;
-
-	val = __raw_readl(hw->regs + REG_CTL);
-	val &= ~0x1f00;
-	if (txbitlen != 32)
-		val |= (txbitlen << 8);
-
-	__raw_writel(val, hw->regs + REG_CTL);
-
-}
-
-static inline void nuvoton_set_clock_polarity(struct nuvoton_spi *hw, unsigned int polarity)
-{
-	unsigned int val;
-
-	val = __raw_readl(hw->regs + REG_CTL);
-
-	if (polarity)
-		val |= SELECTPOL;
-	else
-		val &= ~SELECTPOL;
-	__raw_writel(val, hw->regs + REG_CTL);
-}
-
-static int nuvoton_spi_set_freq(struct nuvoton_spi *nuvoton, unsigned long freq)
-{
-	int ret;
-
-	if (nuvoton->cur_speed_hz == freq)
-		return 0;
-
-	ret = nuvoton_spi_clk_setup(nuvoton, freq);
-	if (ret)
-		return ret;
-
-	nuvoton->cur_speed_hz = freq;
-
-	return 0;
-}
-
-static inline void nuvoton_tx_rx_edge(struct nuvoton_spi *hw, unsigned int tx_edge, unsigned int rx_edge)
-{
-	unsigned int val;
-
-	val = __raw_readl(hw->regs + REG_CTL);
-
-	if (tx_edge)
-		val |= TXNEG;
-	else
-		val &= ~TXNEG;
-
-	if (rx_edge)
-		val |= RXNEG;
-	else
-		val &= ~RXNEG;
-
-	__raw_writel(val, hw->regs + REG_CTL);
-
-}
-
-static inline void nuvoton_send_first(struct nuvoton_spi *hw, unsigned int lsb)
-{
-	unsigned int val;
-
-	val = __raw_readl(hw->regs + REG_CTL);
-
-	if (lsb)
-		val |= LSB;
-	else
-		val &= ~LSB;
-	__raw_writel(val, hw->regs + REG_CTL);
-}
-
-static inline void nuvoton_set_sleep(struct nuvoton_spi *hw, unsigned int sleep)
-{
-	unsigned int val;
-
-	val = __raw_readl(hw->regs + REG_CTL);
-
-	val &= ~(0x0f << 4);
-
-	if (sleep)
-		val |= (sleep << 4);
-
-	__raw_writel(val, hw->regs + REG_CTL);
-}
-
-static int nuvoton_spi_update_state(struct spi_device *spi)
-{
-	struct nuvoton_spi *hw = spi_controller_get_devdata(spi->controller);
-	unsigned char spimode;
-
-	spi->mode = hw->pdata->spimode;
-
-	//Mode 0: CPOL=0, CPHA=0; active high
-	//Mode 1: CPOL=0, CPHA=1; active low
-	//Mode 2: CPOL=1, CPHA=0; active low
-	//Mode 3: CPOL=1, CPHA=1; active high
-	if (spi->mode & SPI_CPOL)
-		hw->pdata->clkpol = 1;
-	else
-		hw->pdata->clkpol = 0;
-
-	spimode = spi->mode & 0xff; //remove dual/quad bit
-
-	if ((spimode == SPI_MODE_0) || (spimode == SPI_MODE_3)) {
-		hw->pdata->txneg = 1;
-		hw->pdata->rxneg = 0;
-	} else {
-		hw->pdata->txneg = 0;
-		hw->pdata->rxneg = 1;
+	switch (bpw) {
+	case 8:
+		return DMA_SLAVE_BUSWIDTH_1_BYTE;
+	case 16:
+		return DMA_SLAVE_BUSWIDTH_2_BYTES;
+	case 32:
+		return DMA_SLAVE_BUSWIDTH_4_BYTES;
+	default:
+		return DMA_SLAVE_BUSWIDTH_UNDEFINED;
 	}
-
-	if (spi->mode & SPI_LSB_FIRST)
-		hw->pdata->lsb = 1;
-	else
-		hw->pdata->lsb = 0;
-
-	return 0;
 }
 
-static int nuvoton_spi_setupxfer(struct spi_device *spi)
+static bool ma35_spi_can_dma(struct spi_controller *ctlr,
+			     struct spi_device *spi,
+			     struct spi_transfer *xfer)
 {
-	struct nuvoton_spi *hw = spi_controller_get_devdata(spi->controller);
-	int ret;
+	struct ma35_spi *hw = spi_controller_get_devdata(ctlr);
+	u8 bpw = xfer->bits_per_word ?: spi->bits_per_word;
+	unsigned int align;
 
-	ret = nuvoton_spi_update_state(spi);
-	if (ret)
-		return ret;
-
-	nuvoton_setup_txbitlen(hw, hw->pdata->txbitlen);
-	nuvoton_tx_rx_edge(hw, hw->pdata->txneg, hw->pdata->rxneg);
-	nuvoton_set_clock_polarity(hw, hw->pdata->clkpol);
-	nuvoton_send_first(hw, hw->pdata->lsb);
-	nuvoton_set_divider(hw);
-
-	return 0;
-}
-
-static void nuvoton_spi_hw_init(struct nuvoton_spi *hw)
-{
-	spin_lock_init(&hw->lock);
-
-	if (hw->pdata->spimode & SPI_CPOL)
-		hw->pdata->clkpol = 1;
-	else
-		hw->pdata->clkpol = 0;
-
-	if ((hw->pdata->spimode == SPI_MODE_0) || (hw->pdata->spimode == SPI_MODE_3)) {
-		hw->pdata->txneg = 1;
-		hw->pdata->rxneg = 0;
-	} else {
-		hw->pdata->txneg = 0;
-		hw->pdata->rxneg = 1;
-	}
-
-	nuvoton_tx_rx_edge(hw, hw->pdata->txneg, hw->pdata->rxneg);
-	nuvoton_send_first(hw, hw->pdata->lsb);
-	nuvoton_set_sleep(hw, hw->pdata->sleep);
-	nuvoton_setup_txbitlen(hw, hw->pdata->txbitlen);
-	nuvoton_set_clock_polarity(hw, hw->pdata->clkpol);
-
-	__raw_writel((__raw_readl(hw->regs + REG_INTERNAL) & ~0xF000) | (hw->pdata->mrxphase << 12),
-	             hw->regs + REG_INTERNAL); /* MRxPhase(SPI_INTERNAL[15:12] */
-
-	__raw_writel(__raw_readl(hw->regs + REG_CTL) | SPIEN, hw->regs + REG_CTL); /* enable SPI */
-	while ((__raw_readl(hw->regs + REG_STATUS) & SPIENSTS) == 0)
-		;
-
-	__raw_writel(__raw_readl(hw->regs + REG_FIFOCTL) | (TXRST | RXRST), hw->regs + REG_FIFOCTL);
-	while (__raw_readl(hw->regs + REG_STATUS) & TXRXRST)
-		;
-
-}
-
-static inline unsigned int hw_tx(struct nuvoton_spi *hw, unsigned int count)
-{
-	const unsigned char *tx_byte = hw->tx;
-	const unsigned short *tx_short = hw->tx;
-	const unsigned int *tx_int = hw->tx;
-	unsigned int bwp = hw->pdata->txbitlen;
-
-	if (bwp <= 8)
-		return tx_byte ? tx_byte[count] : 0;
-	else if (bwp <= 16)
-		return tx_short ? tx_short[count] : 0;
-	else
-		return tx_int ? tx_int[count] : 0;
-}
-
-static inline void hw_rx(struct nuvoton_spi *hw, unsigned int data, int count)
-{
-	unsigned char *rx_byte = hw->rx;
-	unsigned short *rx_short = hw->rx;
-	unsigned int *rx_int = hw->rx;
-	int bwp = hw->pdata->txbitlen;
-
-	if (bwp <= 8)
-		rx_byte[count] = data;
-	else if (bwp <= 16)
-		rx_short[count] = data;
-	else
-		rx_int[count] = data;
-}
-
-static int nuvoton_spi_data_xfer(struct nuvoton_spi *hw, const void *txbuf,
-                                 void *rxbuf, unsigned int len)
-{
-	unsigned long end;
-	unsigned int  i;
-
-	__raw_writel(__raw_readl(hw->regs + REG_FIFOCTL) | (TXRST | RXRST), hw->regs + REG_FIFOCTL);
-	end = jiffies + msecs_to_jiffies(SPI_GENERAL_TIMEOUT_MS);
-	while (__raw_readl(hw->regs + REG_STATUS) & TXRXRST) {
-		if (time_after(jiffies, end)) {
-			printk("SPI TXRXRST timeout: %d\n", __LINE__);
-			return -ETIMEDOUT;
-		}
-	}
-
-	hw->tx = txbuf;
-	hw->rx = rxbuf;
-
-	end = jiffies + msecs_to_jiffies(SPI_GENERAL_TIMEOUT_MS);
-	if (hw->rx) {
-		for (i = 0; i < len; i++) {
-			__raw_writel(hw_tx(hw, i), hw->regs + REG_TX);
-			while (((__raw_readl(hw->regs + REG_STATUS) & RXEMPTY) == RXEMPTY)) {
-				if (time_after(jiffies, end)) {
-					printk("SPI RXEMPTY timeout: %d\n", __LINE__);
-					return -ETIMEDOUT;
-				}
-			}
-			hw_rx(hw, __raw_readl(hw->regs + REG_RX), i);
-		}
-	} else {
-		for (i = 0; i < len; i++) {
-			while (((__raw_readl(hw->regs + REG_STATUS) & TXFULL) == TXFULL)) {
-				if (time_after(jiffies, end)) {
-					printk("SPI TXFULL timeout: %d\n", __LINE__);
-					return -ETIMEDOUT;
-				}
-			}
-			__raw_writel(hw_tx(hw, i), hw->regs + REG_TX);
-		}
-	}
-
-	while (__raw_readl(hw->regs + REG_STATUS) & BUSY) {
-		if (time_after(jiffies, end)) {
-			printk("SPI BUSY timeout: %d\n", __LINE__);
-			return -ETIMEDOUT;
-		}
-	}
-
-	return 0;
-}
-
-static bool nuvoton_spi_mem_supports_op(struct spi_mem *mem,
-                                        const struct spi_mem_op *op)
-{
-	if (op->data.buswidth > 4 || op->addr.buswidth > 4 ||
-	    op->dummy.buswidth > 4 || op->cmd.buswidth > 4)
+	if (!hw->dma_tx || !hw->dma_rx || xfer->len < MA35_SPI_DMA_MIN_BYTES)
 		return false;
 
-	if (op->data.nbytes && op->dummy.nbytes &&
-	    op->data.buswidth != op->dummy.buswidth)
+	if (!bpw)
+		bpw = MA35_SPI_DEFAULT_BPW;
+
+	switch (bpw) {
+	case 8:
+		align = 1;
+		break;
+	case 16:
+		align = 2;
+		break;
+	case 32:
+		align = 4;
+		break;
+	default:
+		return false;
+	}
+
+	if (!IS_ALIGNED(xfer->len, align))
 		return false;
 
-	if (op->addr.nbytes > 7)
+	if (xfer->tx_buf && !IS_ALIGNED((unsigned long)xfer->tx_buf, align))
+		return false;
+
+	if (xfer->rx_buf && !IS_ALIGNED((unsigned long)xfer->rx_buf, align))
 		return false;
 
 	return true;
 }
 
-static void nuvoton_spi_set_cs(struct spi_device *spi, bool lvl)
+static void ma35_spi_dma_complete(void *arg)
 {
-	struct nuvoton_spi *nuvoton = spi_controller_get_devdata(spi->controller);
-	int chip_select;
-	unsigned long end;
-	unsigned int val;
-
-	chip_select = spi_get_chipselect(spi, 0);
-
-	val = __raw_readl(nuvoton->regs + REG_SSCTL);
-
-	if (chip_select == 0) {
-		if (!lvl)
-			val |= SELECTSLAVE0;
-		else
-			val &= ~SELECTSLAVE0;
-	} else {
-		if (!lvl)
-			val |= SELECTSLAVE1;
-		else
-			val &= ~SELECTSLAVE1;
-	}
-
-	end = jiffies + msecs_to_jiffies(3000);
-	while (__raw_readl(nuvoton->regs + REG_STATUS) & BUSY) {
-		if (time_after(jiffies, end)) {
-			printk("SPI BUSY timeout: %d, %s - %d\n", __LINE__, __func__, lvl);
-			return;
-		}
-	}
-
-	__raw_writel(val, nuvoton->regs + REG_SSCTL);
+	complete(arg);
 }
 
-static struct nuvoton_spi_info *nuvoton_spi_parse_dt(struct device *dev)
+static unsigned long ma35_spi_dma_timeout(struct spi_transfer *xfer)
 {
-	struct nuvoton_spi_info *sci;
-	u32 temp;
+	u32 speed_hz = xfer->effective_speed_hz ?: xfer->speed_hz;
+	u64 ms;
 
-	sci = devm_kzalloc(dev, sizeof(*sci), GFP_KERNEL);
-	if (!sci)
-		return ERR_PTR(-ENOMEM);
+	if (!speed_hz)
+		speed_hz = 100000;
 
-	if (of_property_read_u32(dev->of_node, "num_cs", &temp)) {
-		dev_warn(dev, "can't get num_cs from dt\n");
-		sci->num_cs = 2;
-	} else {
-		sci->num_cs = temp;
-	}
+	ms = DIV_ROUND_UP_ULL((u64)xfer->len * 8 * MSEC_PER_SEC, speed_hz);
+	ms = ms * 2 + 200;
+	ms = max_t(u64, ms, 1000);
+	ms = min_t(u64, ms, UINT_MAX);
 
-	if (of_property_read_u32(dev->of_node, "lsb", &temp)) {
-		dev_warn(dev, "can't get lsb from dt\n");
-		sci->lsb = 0;
-	} else {
-		sci->lsb = temp;
-	}
-
-	if (of_property_read_u32(dev->of_node, "sleep", &temp)) {
-		dev_warn(dev, "can't get sleep from dt\n");
-		sci->sleep = 0;
-	} else {
-		sci->sleep = temp;
-	}
-
-	if (of_property_read_u32(dev->of_node, "txbitlen", &temp)) {
-		dev_warn(dev, "can't get txbitlen from dt\n");
-		sci->txbitlen = 8;
-	} else {
-		sci->txbitlen = temp;
-	}
-
-	if (of_property_read_u32(dev->of_node, "bus_num", &temp)) {
-		dev_warn(dev, "can't get bus_num from dt\n");
-		sci->bus_num = 0;
-	} else {
-		sci->bus_num = temp;
-	}
-
-	if (of_property_read_u32(dev->of_node, "spimode", &temp)) {
-		dev_warn(dev, "can't get spimode from dt\n");
-		sci->spimode = 0;
-	} else {
-		sci->spimode = temp;
-	}
-
-	if (of_property_read_u32(dev->of_node, "mrxphase", &temp)) {
-		dev_warn(dev, "can't get mrxphase from dt\n");
-		sci->mrxphase = 0;
-	} else {
-		sci->mrxphase = temp;
-	}
-
-	return sci;
+	return msecs_to_jiffies((unsigned int)ms);
 }
 
-
-
-static int nuvoton_spi_mem_exec_op(struct spi_mem *mem,
-                                   const struct spi_mem_op *op)
+static int ma35_spi_config_dma(struct ma35_spi *hw,
+			       enum dma_slave_buswidth width)
 {
-	struct nuvoton_spi *nuvoton = spi_controller_get_devdata(mem->spi->controller);
-	int i, ret;
-	u8 addr[8];
+	struct dma_slave_config config = { };
+	int ret;
 
-	mutex_lock(&nuvoton->mutex_lock);
+	config.direction = DMA_DEV_TO_MEM;
+	config.src_addr = hw->phys_base + MA35_SPI_RX;
+	config.src_addr_width = width;
+	config.src_maxburst = 1;
+	config.peripheral_config = &hw->rx_peripheral;
+	config.peripheral_size = sizeof(hw->rx_peripheral);
 
-	ret = nuvoton_spi_set_freq(nuvoton, mem->spi->max_speed_hz);
+	ret = dmaengine_slave_config(hw->dma_rx, &config);
 	if (ret) {
-		printk("nuvoton_spi_set_freq failed!\n");
-		goto out;
-	}
-	nuvoton_spi_setupxfer(mem->spi);
-
-	nuvoton_spi_set_cs(mem->spi, 0); //Activate CS
-
-	ret = nuvoton_spi_data_xfer(nuvoton, &op->cmd.opcode, NULL, 1);
-	if (ret) {
-		printk("nuvoton_spi_data_xfer failed!! %d\n", __LINE__);
-		goto out;
+		dev_err(hw->dev, "failed to configure RX DMA: %d\n", ret);
+		return ret;
 	}
 
-	for (i = 0; i < op->addr.nbytes; i++)
-		addr[i] = op->addr.val >> (8 * (op->addr.nbytes - i - 1));
+	memset(&config, 0, sizeof(config));
+	config.direction = DMA_MEM_TO_DEV;
+	config.dst_addr = hw->phys_base + MA35_SPI_TX;
+	config.dst_addr_width = width;
+	config.dst_maxburst = 1;
+	config.peripheral_config = &hw->tx_peripheral;
+	config.peripheral_size = sizeof(hw->tx_peripheral);
 
-	ret = nuvoton_spi_data_xfer(nuvoton, addr, NULL, op->addr.nbytes);
-	if (ret) {
-		printk("nuvoton_spi_data_xfer failed!! %d\n", __LINE__);
-		goto out;
-	}
-
-	ret = nuvoton_spi_data_xfer(nuvoton, NULL, NULL, op->dummy.nbytes);
-	if (ret) {
-		printk("nuvoton_spi_data_xfer failed!! %d\n", __LINE__);
-		goto out;
-	}
-
-	ret = nuvoton_spi_data_xfer(nuvoton,
-	                            op->data.dir == SPI_MEM_DATA_OUT ?
-	                            op->data.buf.out : NULL,
-	                            op->data.dir == SPI_MEM_DATA_IN ?
-	                            op->data.buf.in : NULL,
-	                            op->data.nbytes);
-
-out:
-
-	nuvoton_spi_set_cs(mem->spi, 1); //Deactivate CS
-
-	mutex_unlock(&nuvoton->mutex_lock);
+	ret = dmaengine_slave_config(hw->dma_tx, &config);
+	if (ret)
+		dev_err(hw->dev, "failed to configure TX DMA: %d\n", ret);
 
 	return ret;
 }
 
-static const struct spi_controller_mem_ops nuvoton_spi_mem_ops = {
-	.supports_op = nuvoton_spi_mem_supports_op,
-	.exec_op = nuvoton_spi_mem_exec_op,
-};
-
-static int nuvoton_spi_transfer_one(struct spi_controller *host,
-                                    struct spi_device *spi,
-                                    struct spi_transfer *t)
+static void ma35_spi_dma_abort(struct ma35_spi *hw)
 {
-	struct nuvoton_spi *nuvoton = spi_controller_get_devdata(host);
-	unsigned int busw = OP_BUSW_1;
+	ma35_spi_write(hw, MA35_SPI_PDMACTL, 0);
+	ma35_spi_disable(hw);
+	dmaengine_terminate_sync(hw->dma_tx);
+	dmaengine_terminate_sync(hw->dma_rx);
+	ma35_spi_reset_fifo(hw);
+}
+
+static int ma35_spi_dma_transfer(struct ma35_spi *hw,
+				 struct spi_transfer *xfer, u8 bpw)
+{
+	struct dma_async_tx_descriptor *rxdesc;
+	struct dma_async_tx_descriptor *txdesc;
+	enum dma_slave_buswidth width;
+	dma_cookie_t rx_cookie;
+	dma_cookie_t tx_cookie;
+	unsigned long timeout;
+	int disable_ret;
 	int ret;
 
-	nuvoton_spi_setupxfer(spi);
+	width = ma35_spi_dma_width(bpw);
+	if (width == DMA_SLAVE_BUSWIDTH_UNDEFINED)
+		return -EINVAL;
 
-	if (t->rx_buf && t->tx_buf) {
-		if (((spi->mode & SPI_TX_QUAD) &&
-		     !(spi->mode & SPI_RX_QUAD)) ||
-		    ((spi->mode & SPI_TX_DUAL) &&
-		     !(spi->mode & SPI_RX_DUAL)))
-			return -ENOTSUPP;
-	}
-
-	if (t->tx_buf) {
-		if (spi->mode & SPI_TX_DUAL)
-			busw = OP_BUSW_2;
-	} else if (t->rx_buf) {
-		if (spi->mode & SPI_RX_DUAL)
-			busw = OP_BUSW_2;
-	}
-
-	ret = nuvoton_spi_set_freq(nuvoton, t->speed_hz);
+	ret = ma35_spi_config_dma(hw, width);
 	if (ret)
 		return ret;
 
-	ret = nuvoton_spi_data_xfer(nuvoton, t->tx_buf, t->rx_buf, t->len);
+	reinit_completion(&hw->dma_rx_done);
+	reinit_completion(&hw->dma_tx_done);
+
+	rxdesc = dmaengine_prep_slave_sg(hw->dma_rx,
+					xfer->rx_sg.sgl, xfer->rx_sg.nents,
+					DMA_DEV_TO_MEM,
+					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+	if (!rxdesc)
+		return -EIO;
+
+	rxdesc->callback = ma35_spi_dma_complete;
+	rxdesc->callback_param = &hw->dma_rx_done;
+	rx_cookie = dmaengine_submit(rxdesc);
+	ret = dma_submit_error(rx_cookie);
 	if (ret)
-		return ret;
+		goto err_abort;
 
-	spi_finalize_current_transfer(host);
+	txdesc = dmaengine_prep_slave_sg(hw->dma_tx,
+					xfer->tx_sg.sgl, xfer->tx_sg.nents,
+					DMA_MEM_TO_DEV,
+					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+	if (!txdesc) {
+		ret = -EIO;
+		goto err_abort;
+	}
 
-	return 0;
-}
+	txdesc->callback = ma35_spi_dma_complete;
+	txdesc->callback_param = &hw->dma_tx_done;
+	tx_cookie = dmaengine_submit(txdesc);
+	ret = dma_submit_error(tx_cookie);
+	if (ret)
+		goto err_abort;
 
-static int __maybe_unused nuvoton_spi_runtime_suspend(struct device *dev)
-{
-	struct spi_controller *host = dev_get_drvdata(dev);
-	struct nuvoton_spi *nuvoton = spi_controller_get_devdata(host);
+	/* Arm both channels before enabling peripheral DMA requests. */
+	dma_async_issue_pending(hw->dma_rx);
+	dma_async_issue_pending(hw->dma_tx);
 
-	nuvoton_spi_clk_disable(nuvoton);
-	clk_disable_unprepare(nuvoton->clk);
+	ma35_spi_write(hw, MA35_SPI_PDMACTL,
+			 MA35_SPI_PDMACTL_TXPDMAEN |
+			 MA35_SPI_PDMACTL_RXPDMAEN);
 
-	return 0;
-}
-
-static int __maybe_unused nuvoton_spi_runtime_resume(struct device *dev)
-{
-	struct spi_controller *host = dev_get_drvdata(dev);
-	struct nuvoton_spi *nuvoton = spi_controller_get_devdata(host);
-	int ret;
-
-	ret = clk_prepare_enable(nuvoton->clk);
+	ret = ma35_spi_enable(hw);
 	if (ret) {
-		dev_err(dev, "Cannot enable ps_clock.\n");
-		return ret;
+		dev_err(hw->dev, "failed to enable controller for DMA\n");
+		goto err_abort;
 	}
 
-	return nuvoton_spi_clk_enable(nuvoton);
+	timeout = ma35_spi_dma_timeout(xfer);
+
+	if (!wait_for_completion_timeout(&hw->dma_tx_done, timeout)) {
+		dev_err(hw->dev, "TX DMA timeout\n");
+		ret = -ETIMEDOUT;
+		goto err_abort;
+	}
+
+	if (!wait_for_completion_timeout(&hw->dma_rx_done, timeout)) {
+		dev_err(hw->dev, "RX DMA timeout\n");
+		ret = -ETIMEDOUT;
+		goto err_abort;
+	}
+
+	if (dma_async_is_tx_complete(hw->dma_tx, tx_cookie, NULL, NULL) !=
+	    DMA_COMPLETE ||
+	    dma_async_is_tx_complete(hw->dma_rx, rx_cookie, NULL, NULL) !=
+	    DMA_COMPLETE) {
+		dev_err(hw->dev, "DMA transfer completed with an error\n");
+		ret = -EIO;
+		goto err_abort;
+	}
+
+	ma35_spi_write(hw, MA35_SPI_PDMACTL, 0);
+
+	ret = ma35_spi_wait_idle(hw);
+	if (ret)
+		dev_err(hw->dev, "SPI did not become idle after DMA\n");
+
+	disable_ret = ma35_spi_disable(hw);
+	if (disable_ret) {
+		dev_err(hw->dev, "failed to disable controller after DMA\n");
+		if (!ret)
+			ret = disable_ret;
+	}
+
+	return ret;
+
+err_abort:
+	ma35_spi_dma_abort(hw);
+	return ret;
 }
 
-static const struct dev_pm_ops nuvoton_spi_dev_pm_ops = {
-	SET_RUNTIME_PM_OPS(nuvoton_spi_runtime_suspend,
-	                   nuvoton_spi_runtime_resume, NULL)
-};
-
-static int nuvoton_spi_probe(struct platform_device *pdev)
+static int ma35_spi_transfer_one(struct spi_controller *ctlr,
+				 struct spi_device *spi,
+				 struct spi_transfer *xfer)
 {
-	struct spi_controller   *host;
-	struct nuvoton_spi *nuvoton;
+	struct ma35_spi *hw = spi_controller_get_devdata(ctlr);
+	u8 bpw;
+	int disable_ret;
 	int ret;
-	u32   val32[4];
-	int err = 0;
-	int status = 0;
 
-	host = spi_alloc_host(&pdev->dev, sizeof(struct nuvoton_spi));
-	if (!host)
-		return -ENOMEM;
+	if (!xfer->len)
+		return 0;
 
-	platform_set_drvdata(pdev, host);
+	ret = ma35_spi_configure_transfer(hw, spi, xfer, &bpw);
+	if (ret)
+		return ret;
 
-	nuvoton = spi_controller_get_devdata(host);
+	if (ma35_spi_can_dma(ctlr, spi, xfer))
+		return ma35_spi_dma_transfer(hw, xfer, bpw);
 
-	host->num_chipselect = 2;
-	host->mem_ops = &nuvoton_spi_mem_ops;
-
-	host->set_cs = nuvoton_spi_set_cs;
-	host->transfer_one = nuvoton_spi_transfer_one;
-	host->bits_per_word_mask = SPI_BPW_MASK(8);
-	host->mode_bits = SPI_CPOL | SPI_CPHA |
-	                  SPI_RX_DUAL | SPI_TX_DUAL;
-
-	host->dev.of_node = pdev->dev.of_node;
-
-	nuvoton->host = spi_controller_get(host);
-	nuvoton->pdata = nuvoton_spi_parse_dt(&pdev->dev);
-	nuvoton->dev = &pdev->dev;
-	nuvoton->host = host;
-	spin_lock_init(&nuvoton->lock);
-	mutex_init(&nuvoton->mutex_lock);
-
-	if (nuvoton->pdata == NULL) {
-		dev_err(&pdev->dev, "No platform data supplied\n");
-		err = -ENOENT;
-		goto err_pdata;
+	ret = ma35_spi_enable(hw);
+	if (ret) {
+		dev_err(hw->dev, "failed to enable controller\n");
+		goto out_disable;
 	}
 
-	init_completion(&nuvoton->txdone);
-	init_completion(&nuvoton->rxdone);
+	ret = ma35_spi_pio_transfer(hw, xfer, bpw);
 
-	nuvoton->clk = of_clk_get(pdev->dev.of_node, 0);
-	if (IS_ERR(nuvoton->clk)) {
-		dev_err(&pdev->dev, "unable to get SYS clock, err=%d\n",
-		        status);
-		goto err_clk;
+out_disable:
+	disable_ret = ma35_spi_disable(hw);
+	if (disable_ret) {
+		dev_err(hw->dev, "failed to disable controller\n");
+		if (!ret)
+			ret = disable_ret;
 	}
-	clk_prepare_enable(nuvoton->clk);
 
-	if (of_property_read_u32_array(pdev->dev.of_node, "reg", val32, 4) != 0) {
-		dev_err(&pdev->dev, "can not get bank!\n");
+	return ret;
+}
+
+static void ma35_spi_set_cs_level(struct ma35_spi *hw, unsigned int cs,
+				   bool assert)
+{
+	unsigned long flags;
+	u32 mask;
+	u32 val;
+
+	switch (cs) {
+	case 0:
+		mask = MA35_SPI_SSCTL_SS0;
+		break;
+	case 1:
+		mask = MA35_SPI_SSCTL_SS1;
+		break;
+	default:
+		dev_warn(hw->dev, "invalid native chip select %u\n", cs);
+		return;
+	}
+
+	spin_lock_irqsave(&hw->ssctl_lock, flags);
+
+	val = ma35_spi_read(hw, MA35_SPI_SSCTL);
+	if (assert)
+		val |= mask;
+	else
+		val &= ~mask;
+	ma35_spi_write(hw, MA35_SPI_SSCTL, val);
+
+	spin_unlock_irqrestore(&hw->ssctl_lock, flags);
+}
+
+static int ma35_spi_setup(struct spi_device *spi)
+{
+	unsigned int cs = spi_get_chipselect(spi, 0);
+
+	if (spi_get_csgpiod(spi, 0))
+		return 0;
+
+	if (cs >= MA35_SPI_MAX_NATIVE_CS) {
+		dev_err(&spi->dev, "invalid native chip select %u\n", cs);
 		return -EINVAL;
 	}
 
-	nuvoton->phyaddr = val32[1];
-	pr_debug("nuvoton->phyaddr = 0x%lx\n", (ulong)nuvoton->phyaddr);
-
-	nuvoton->res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (nuvoton->res == NULL) {
-		dev_err(&pdev->dev, "Cannot get IORESOURCE_MEM\n");
-		err = -ENOENT;
-		goto err_pdata;
+	if (spi->mode & SPI_CS_HIGH) {
+		dev_err(&spi->dev,
+			"active-high native chip select is not supported\n");
+		return -EINVAL;
 	}
 
-	nuvoton->regs = devm_ioremap_resource(&pdev->dev, nuvoton->res);
-	nuvoton->irq = platform_get_irq(pdev, 0);
-	if (nuvoton->irq < 0) {
-		dev_err(&pdev->dev, "No IRQ specified\n");
-		err = -ENOENT;
-		goto err_pdata;
+	return 0;
+}
+
+static void ma35_spi_set_cs(struct spi_device *spi, bool level)
+{
+	struct ma35_spi *hw = spi_controller_get_devdata(spi->controller);
+
+	/*
+	 * The SPI core passes the physical CS level to ->set_cs(). Native
+	 * chip selects are active low.
+	 */
+	ma35_spi_set_cs_level(hw, spi_get_chipselect(spi, 0), !level);
+}
+
+static void ma35_spi_handle_err(struct spi_controller *ctlr,
+				struct spi_message *message)
+{
+	struct ma35_spi *hw = spi_controller_get_devdata(ctlr);
+	int ret;
+
+	(void)message;
+
+	ma35_spi_write(hw, MA35_SPI_PDMACTL, 0);
+	ma35_spi_disable(hw);
+
+	if (hw->dma_tx)
+		dmaengine_terminate_sync(hw->dma_tx);
+	if (hw->dma_rx)
+		dmaengine_terminate_sync(hw->dma_rx);
+
+	ret = ma35_spi_reset_fifo(hw);
+	if (ret)
+		dev_warn(hw->dev, "failed to reset FIFO after transfer error: %d\n",
+			 ret);
+}
+
+static int ma35_spi_hw_init(struct ma35_spi *hw)
+{
+	u32 ctl_mask;
+	u32 fifo_mask;
+	u32 ssctl_mask;
+	int ret;
+
+	ret = ma35_spi_disable(hw);
+	if (ret)
+		return ret;
+
+	ctl_mask = MA35_SPI_CTL_DATDIR |
+		   MA35_SPI_CTL_REORDER |
+		   MA35_SPI_CTL_SLAVE |
+		   MA35_SPI_CTL_UNITIEN |
+		   MA35_SPI_CTL_RXONLY |
+		   MA35_SPI_CTL_HALFDPX |
+		   MA35_SPI_CTL_LSB |
+		   MA35_SPI_CTL_DWIDTH_MASK |
+		   MA35_SPI_CTL_SUSPITV_MASK |
+		   MA35_SPI_CTL_CLKPOL |
+		   MA35_SPI_CTL_TXNEG |
+		   MA35_SPI_CTL_RXNEG;
+
+	ma35_spi_update_bits(hw, MA35_SPI_CTL, ctl_mask,
+			       MA35_SPI_CTL_TXNEG |
+			       FIELD_PREP(MA35_SPI_CTL_DWIDTH_MASK,
+					  MA35_SPI_DEFAULT_BPW));
+
+	ssctl_mask = MA35_SPI_SSCTL_SS0 |
+		     MA35_SPI_SSCTL_SS1 |
+		     MA35_SPI_SSCTL_SSACTPOL |
+		     MA35_SPI_SSCTL_AUTOSS |
+		     MA35_SPI_SSCTL_SLV3WIRE |
+		     MA35_SPI_SSCTL_SLVBEIEN |
+		     MA35_SPI_SSCTL_SLVURIEN |
+		     MA35_SPI_SSCTL_SSACTIEN |
+		     MA35_SPI_SSCTL_SSINAIEN;
+	ma35_spi_update_ssctl_bits(hw, ssctl_mask, 0);
+
+	ma35_spi_write(hw, MA35_SPI_PDMACTL, 0);
+
+	fifo_mask = MA35_SPI_FIFOCTL_SLVBERX |
+		    MA35_SPI_FIFOCTL_TXUFIEN |
+		    MA35_SPI_FIFOCTL_TXUFPOL |
+		    MA35_SPI_FIFOCTL_RXOVIEN |
+		    MA35_SPI_FIFOCTL_RXTOIEN |
+		    MA35_SPI_FIFOCTL_TXTHIEN |
+		    MA35_SPI_FIFOCTL_RXTHIEN;
+	ma35_spi_update_bits(hw, MA35_SPI_FIFOCTL, fifo_mask, 0);
+
+	ret = ma35_spi_reset_fifo(hw);
+	if (ret)
+		return ret;
+
+	/* Keep the controller disabled until the SPI core starts a transfer. */
+	return 0;
+}
+
+static void ma35_spi_hw_shutdown(void *data)
+{
+	struct ma35_spi *hw = data;
+
+	ma35_spi_write(hw, MA35_SPI_PDMACTL, 0);
+	if (hw->dma_tx)
+		dmaengine_terminate_sync(hw->dma_tx);
+	if (hw->dma_rx)
+		dmaengine_terminate_sync(hw->dma_rx);
+	ma35_spi_disable(hw);
+}
+
+static void ma35_spi_release_dma(void *data)
+{
+	struct ma35_spi *hw = data;
+
+	if (hw->dma_tx) {
+		dma_release_channel(hw->dma_tx);
+		hw->dma_tx = NULL;
 	}
 
-	nuvoton_spi_hw_init(nuvoton);
+	if (hw->dma_rx) {
+		dma_release_channel(hw->dma_rx);
+		hw->dma_rx = NULL;
+	}
+}
 
-	ret = devm_spi_register_controller(&pdev->dev, host);
+static int ma35_spi_request_dma(struct spi_controller *ctlr,
+				struct ma35_spi *hw)
+{
+	struct device *dev = hw->dev;
+	int ret;
+
+	if (!device_property_present(dev, "dmas"))
+		return 0;
+
+	hw->dma_tx = dma_request_chan(dev, "tx");
+	if (IS_ERR(hw->dma_tx)) {
+		ret = PTR_ERR(hw->dma_tx);
+		hw->dma_tx = NULL;
+		return dev_err_probe(dev, ret, "failed to request TX DMA channel\n");
+	}
+
+	hw->dma_rx = dma_request_chan(dev, "rx");
+	if (IS_ERR(hw->dma_rx)) {
+		ret = PTR_ERR(hw->dma_rx);
+		hw->dma_rx = NULL;
+		dma_release_channel(hw->dma_tx);
+		hw->dma_tx = NULL;
+		return dev_err_probe(dev, ret, "failed to request RX DMA channel\n");
+	}
+
+	ret = device_property_read_u32(dev, "nuvoton,pdma-reqsel-tx",
+				       &hw->tx_peripheral.reqsel);
 	if (ret) {
-		dev_err(&pdev->dev, "devm_spi_register_controller failed\n");
-		pm_runtime_disable(&pdev->dev);
+		ret = dev_err_probe(dev, ret, "missing TX PDMA request selector\n");
+		goto err_release;
 	}
+
+	ret = device_property_read_u32(dev, "nuvoton,pdma-reqsel-rx",
+				       &hw->rx_peripheral.reqsel);
+	if (ret) {
+		ret = dev_err_probe(dev, ret, "missing RX PDMA request selector\n");
+		goto err_release;
+	}
+
+	if (hw->tx_peripheral.reqsel > 0xff || hw->rx_peripheral.reqsel > 0xff) {
+		ret = dev_err_probe(dev, -EINVAL, "invalid PDMA request selector\n");
+		goto err_release;
+	}
+
+	init_completion(&hw->dma_tx_done);
+	init_completion(&hw->dma_rx_done);
+
+	ret = devm_add_action_or_reset(dev, ma35_spi_release_dma, hw);
+	if (ret)
+		return ret;
+
+	ctlr->dma_tx = hw->dma_tx;
+	ctlr->dma_rx = hw->dma_rx;
+	ctlr->can_dma = ma35_spi_can_dma;
+	ctlr->max_dma_len = MA35_SPI_MAX_DMA_SEGMENT;
+	ctlr->flags |= SPI_CONTROLLER_MUST_TX | SPI_CONTROLLER_MUST_RX;
+
+	return 0;
+
+err_release:
+	dma_release_channel(hw->dma_rx);
+	dma_release_channel(hw->dma_tx);
+	hw->dma_rx = NULL;
+	hw->dma_tx = NULL;
 
 	return ret;
-
-err_clk:
-	spi_controller_put(nuvoton->host);
-err_pdata:
-	clk_disable(nuvoton->clk);
-	clk_put(nuvoton->clk);
-
-	return err;
 }
 
-static void nuvoton_spi_remove(struct platform_device *pdev)
+static void ma35_spi_assert_reset(void *data)
 {
-	struct spi_controller *host = spi_controller_get(platform_get_drvdata(pdev));
-
-	pm_runtime_get_sync(&pdev->dev);
-
-	pm_runtime_put_noidle(&pdev->dev);
-	pm_runtime_disable(&pdev->dev);
-	pm_runtime_set_suspended(&pdev->dev);
-
-	spi_controller_put(host);
-
+	reset_control_assert(data);
 }
 
-static const struct of_device_id nuvoton_spi_of_match[] = {
-	{ .compatible = "nuvoton,ma35d1-spi", },
-	{ /* sentinel */ }
-};
-MODULE_DEVICE_TABLE(of, nuvoton_spi_of_match);
+static int ma35_spi_probe(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct spi_controller *ctlr;
+	struct reset_control *rst;
+	struct ma35_spi *hw;
+	struct resource *res;
+	unsigned long clk_rate;
+	unsigned int max_divisor;
+	u32 num_cs = MA35_SPI_DEFAULT_NUM_CS;
+	int ret;
 
-static struct platform_driver nuvoton_spi_driver = {
+	ctlr = devm_spi_alloc_host(dev, sizeof(*hw));
+	if (!ctlr)
+		return -ENOMEM;
+
+	hw = spi_controller_get_devdata(ctlr);
+	hw->dev = dev;
+	spin_lock_init(&hw->ssctl_lock);
+
+	hw->regs = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
+	if (IS_ERR(hw->regs))
+		return dev_err_probe(dev, PTR_ERR(hw->regs), "failed to map registers\n");
+	hw->phys_base = res->start;
+
+	hw->clk = devm_clk_get_enabled(dev, NULL);
+	if (IS_ERR(hw->clk))
+		return dev_err_probe(dev, PTR_ERR(hw->clk),
+				     "failed to get and enable clock\n");
+
+	rst = devm_reset_control_get_optional_exclusive(dev, NULL);
+	if (IS_ERR(rst))
+		return dev_err_probe(dev, PTR_ERR(rst), "failed to get reset\n");
+
+	if (rst) {
+		ret = reset_control_deassert(rst);
+		if (ret)
+			return dev_err_probe(dev, ret, "failed to deassert reset\n");
+
+		ret = devm_add_action_or_reset(dev, ma35_spi_assert_reset, rst);
+		if (ret)
+			return ret;
+
+		/* Hardware requires several peripheral clocks after reset release. */
+		udelay(1);
+	}
+
+	clk_rate = clk_get_rate(hw->clk);
+	if (!clk_rate || clk_rate > U32_MAX)
+		return dev_err_probe(dev, -EINVAL, "invalid SPI clock rate %lu\n",
+				     clk_rate);
+
+	ret = device_property_read_u32(dev, "num-cs", &num_cs);
+	if (ret && ret != -EINVAL)
+		return dev_err_probe(dev, ret, "failed to read num-cs\n");
+
+	if (!num_cs)
+		return dev_err_probe(dev, -EINVAL, "invalid num-cs %u\n", num_cs);
+
+	ctlr->num_chipselect = num_cs;
+	ctlr->max_native_cs = MA35_SPI_MAX_NATIVE_CS;
+	ctlr->use_gpio_descriptors = true;
+	ctlr->setup = ma35_spi_setup;
+	ctlr->set_cs = ma35_spi_set_cs;
+	ctlr->transfer_one = ma35_spi_transfer_one;
+	ctlr->handle_err = ma35_spi_handle_err;
+	ctlr->bits_per_word_mask = SPI_BPW_RANGE_MASK(8, 32);
+	ctlr->mode_bits = SPI_CPOL | SPI_CPHA | SPI_LSB_FIRST;
+	ctlr->min_speed_hz = DIV_ROUND_UP(clk_rate, MA35_SPI_MAX_DIVISOR);
+	ctlr->dev.of_node = dev->of_node;
+
+	ret = ma35_spi_calc_divisor(clk_rate, MA35_SPI_MAX_SPEED_HZ,
+				    &max_divisor);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "clock rate does not support SPI transfers\n");
+	ctlr->max_speed_hz = clk_rate / max_divisor;
+
+	ret = ma35_spi_request_dma(ctlr, hw);
+	if (ret)
+		return ret;
+
+	ret = ma35_spi_hw_init(hw);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to initialize controller\n");
+
+	ret = devm_add_action_or_reset(dev, ma35_spi_hw_shutdown, hw);
+	if (ret)
+		return ret;
+
+	platform_set_drvdata(pdev, ctlr);
+
+	ret = devm_spi_register_controller(dev, ctlr);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to register SPI controller\n");
+
+	dev_info(dev, "SPI controller registered, parent %lu Hz, max %u Hz, %s\n",
+		 clk_rate, ctlr->max_speed_hz,
+		 hw->dma_tx && hw->dma_rx ? "PDMA enabled" : "PIO only");
+
+	return 0;
+}
+
+static const struct of_device_id ma35_spi_of_match[] = {
+	{ .compatible = "nuvoton,ma35d0-spi" },
+	{ .compatible = "nuvoton,ma35d1-spi" },
+	{ .compatible = "nuvoton,ma35h0-spi" },
+	{ }
+};
+MODULE_DEVICE_TABLE(of, ma35_spi_of_match);
+
+static struct platform_driver ma35_spi_driver = {
+	.probe = ma35_spi_probe,
 	.driver = {
 		.name = "ma35d1-spi",
-		.of_match_table = nuvoton_spi_of_match,
-		.pm = &nuvoton_spi_dev_pm_ops,
+		.of_match_table = ma35_spi_of_match,
 	},
-	.probe = nuvoton_spi_probe,
-	.remove = nuvoton_spi_remove,
 };
-module_platform_driver(nuvoton_spi_driver);
+module_platform_driver(ma35_spi_driver);
 
-MODULE_ALIAS("platform:nuvoton-spi");
-MODULE_DESCRIPTION("Nuvoton MA35D1 SPI Controller driver!");
 MODULE_AUTHOR("Chi-Wen Weng <cwweng@nuvoton.com>");
+MODULE_DESCRIPTION("Nuvoton MA35 Series SPI controller driver");
 MODULE_LICENSE("GPL");

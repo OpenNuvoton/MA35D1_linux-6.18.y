@@ -126,6 +126,8 @@ static int ma35d1_regulator_probe(struct platform_device *pdev)
 
 static const struct of_device_id ma35d1_regulator_of_match[] = {
 	{ .compatible = "nuvoton,ma35d1-volt", },
+	{ .compatible = "nuvoton,ma35d0-volt", },
+	{ .compatible = "nuvoton,ma35h0-volt", },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, ma35d1_regulator_of_match);

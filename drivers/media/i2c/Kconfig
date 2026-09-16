@@ -110,6 +110,11 @@ config VIDEO_GC2145
 	  To compile this driver as a module, choose M here: the
 	  module will be called gc2145.
 
+config VIDEO_HM1055
+	tristate "HiMax HM1055 sensor support"
+	help
+	  HiMax sensor support
+
 config VIDEO_HI556
 	tristate "Hynix Hi-556 sensor support"
 	help

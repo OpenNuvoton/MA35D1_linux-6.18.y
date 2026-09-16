@@ -805,6 +805,7 @@ config DMA_ENGINE_RAID
 config MA35D1_DMA
 	tristate "MA35D1 DMA support"
 	depends on ARCH_MA35D1
+	default y
 	select DMA_ENGINE
 	select DMA_VIRTUAL_CHANNELS
 	help
@@ -814,6 +815,7 @@ config MA35D1_DMA
 config MA35H0_DMA
 	tristate "MA35H0 DMA support"
 	depends on ARCH_MA35H0
+	default y
 	select DMA_ENGINE
 	select DMA_VIRTUAL_CHANNELS
 	help
@@ -823,6 +825,7 @@ config MA35H0_DMA
 config MA35D0_DMA
 	tristate "MA35D0 DMA support"
 	depends on ARCH_MA35D0
+	default y
 	select DMA_ENGINE
 	select DMA_VIRTUAL_CHANNELS
 	help

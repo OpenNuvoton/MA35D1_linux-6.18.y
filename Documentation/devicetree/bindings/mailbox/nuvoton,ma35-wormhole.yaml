@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/mailbox/nuvoton,ma35-wormhole.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35 Wormhole Mailbox Controller
+
+maintainers:
+  - Chi-Wen Weng <cwweng@nuvoton.com>
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d0-wormhole
+      - nuvoton,ma35d1-wormhole
+      - nuvoton,ma35h0-wormhole
+
+  reg:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    const: wh0_gate
+
+  interrupts:
+    maxItems: 1
+
+  '#mbox-cells':
+    const: 1
+
+  wakeup-source: true
+
+  enable-wakeup:
+    type: boolean
+    deprecated: true
+    description: Legacy property enabling wakeup from mailbox interrupts.
+
+required:
+  - compatible
+  - reg
+  - clocks
+  - clock-names
+  - interrupts
+  - '#mbox-cells'
+
+additionalProperties: false
+
+examples:
+  - |
+    mailbox@403a0000 {
+        compatible = "nuvoton,ma35d1-wormhole";
+        reg = <0x403a0000 0x1000>;
+        clocks = <&clk 1>;
+        clock-names = "wh0_gate";
+        interrupts = <4>;
+        #mbox-cells = <1>;
+        wakeup-source;
+    };

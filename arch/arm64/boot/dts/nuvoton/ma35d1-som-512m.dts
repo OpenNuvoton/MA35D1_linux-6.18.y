@@ -224,7 +224,7 @@
 &i2c1 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_i2c1>;
-	status = "disable";
+	status = "disabled";
 
 	lt8718: edp-bridge@66 {
 		compatible = "nvt, lt8718";
@@ -244,7 +244,7 @@
 		reg = <0x40>;
 		clocks = <&clk DCUP_DIV>;
 		nuvoton,disp = <&display>;
-		status = "disable";
+		status = "disabled";
 	};
 };
 
@@ -256,6 +256,7 @@
 	nau8822: nau8822@1a {
 		compatible = "nuvoton,nau8822";
 		reg = <0x1a> ;
+		#sound-dai-cells = <0>;
 		nuvoton,spk-btl;
 	};
 };
@@ -280,46 +281,39 @@
 	};
 };
 
+/ {
+	sound: sound {
+		compatible = "simple-audio-card";
+		status = "okay";
+
+		simple-audio-card,name = "MA35D1-NAU8822";
+		simple-audio-card,format = "i2s";
+
+		simple-audio-card,bitclock-master = <&sound_cpu>;
+		simple-audio-card,frame-master = <&sound_cpu>;
+
+		sound_cpu: simple-audio-card,cpu {
+			sound-dai = <&i2s0>;
+			system-clock-frequency = <12000000>;
+			system-clock-direction-out;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&nau8822>;
+			system-clock-frequency = <12000000>;
+		};
+	};
+};
+
+&pdma2 {
+	status = "okay";
+};
+
 &i2s0 {
 	status = "okay";
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_i2s0>;
 	powerdown-gpios = <&gpiod 13 GPIO_ACTIVE_HIGH>; /* PD13 */
-};
-
-&i2s1 {
-	status = "okay";
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_i2s1_pdm_mic>;
-	nuvoton,raw-pdm-mono;
-};
-
-&i2s_pcm {
-	status = "okay";
-};
-
-&sound {
-	status = "okay";
-};
-
-/ {
-	mp34dt01m: mp34dt01m {
-		compatible = "st,mp34dt01m";
-	};
-
-	i2s1_pcm: i2s1_pcm {
-		compatible = "nuvoton,ma35d1-pdm-raw-pcm";
-		status = "okay";
-	};
-
-	sound_pdm_mic: sound-pdm-mic {
-		compatible = "nuvoton,ma35d1-audio";
-		model = "ma35d1-pdm-mic";
-		i2s-controller = <&i2s1>;
-		i2s-platform = <&i2s1_pcm>;
-		audio-codec = <&mp34dt01m>;
-		status = "okay";
-	};
 };
 
 &qspi0 {

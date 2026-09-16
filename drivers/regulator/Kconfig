@@ -1821,6 +1821,7 @@ config REGULATOR_QCOM_LABIBB
 config REGULATOR_MA35D1
 	tristate "Nuvoton MA35D1 regulators"
 	depends on ARCH_MA35D1
+	default y
 	help
 	This driver provides support for voltage regulators available
 	on the Nuvoton MA35D1 platform.
@@ -1828,6 +1829,7 @@ config REGULATOR_MA35D1
 config REGULATOR_MA35D0
 	tristate "Nuvoton MA35D0 regulators"
 	depends on ARCH_MA35D0
+	default y
 	help
 	This driver provides support for voltage regulators available
 	on the Nuvoton MA35D0 platform.
@@ -1835,6 +1837,7 @@ config REGULATOR_MA35D0
 config REGULATOR_MA35H0
 	tristate "Nuvoton MA35H0 regulators"
 	depends on ARCH_MA35H0
+	default y
 	help
 	This driver provides support for voltage regulators available
 	on the Nuvoton MA35H0 platform.

@@ -10,7 +10,6 @@
 #include <linux/io.h>
 #include <linux/input.h>
 #include <linux/interrupt.h>
-#include <linux/hrtimer.h>
 #include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -503,9 +502,6 @@ static int ma35d1_ts_register(struct platform_device *pdev)
 		(1 << ADC_RESOLUTION) - 1, 0, 0);
 	input_set_drvdata(ts_dev, priv);
 
-//	hrtimer_init(&priv->trigger_hrt, CLOCK_MONOTONIC, HRTIMER_MODE_REL); //schung
-	priv->trigger_hrt.function = trigger_hrtimer;
-
 	ret = input_register_device(ts_dev);
 	if (ret) {
 		input_free_device(ts_dev);
@@ -778,6 +774,8 @@ static int ma35d1_adc_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+
+	hrtimer_setup(&priv->trigger_hrt, trigger_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 
 	tasklet_init(&priv->ts_tasklet,
 		(void *)ma35d1adc_ts_tasklet,

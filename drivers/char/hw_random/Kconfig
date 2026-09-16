@@ -618,7 +618,7 @@ config HW_RANDOM_ROCKCHIP
 config HW_RANDOM_MA35
 	tristate "Nuvoton MA35 Series Random Number Generator support"
 	depends on ARCH_MA35D1 || ARCH_MA35D0 || ARCH_MA35H0
-	default HW_RANDOM
+	default y
 	help
 	  This driver provides kernel-side support for the MA35 Series SoC
 	  True Random Number Generator.

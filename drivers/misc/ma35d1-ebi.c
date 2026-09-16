@@ -273,10 +273,13 @@ static void ma35d1_ebi_remove(struct platform_device *pdev)
 	clk_disable(ebi[ch]->clk);
 	clk_put(ebi[ch]->clk);
 	misc_deregister(&ebi_dev[ch]);
+
 }
 
 static const struct of_device_id ma35d1_ebi_of_match[] = {
 	{ .compatible = "nuvoton,ma35d1-ebi" },
+	{ .compatible = "nuvoton,ma35d0-ebi" },
+	{ .compatible = "nuvoton,ma35h0-ebi" },
 	{},
 };
 MODULE_DEVICE_TABLE(of, ma35d1_ebi_of_match);

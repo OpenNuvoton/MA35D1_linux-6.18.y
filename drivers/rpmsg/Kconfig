@@ -84,6 +84,7 @@ config RPMSG_VIRTIO
 config MA35D1_AMPM
 	tristate "MA35D1 AMP-M Driver"
 	depends on ARCH_MA35D1
+	default y
 	select RPMSG
 	select RPMSG_CTRL
 	select RPMSG_CHAR
@@ -96,6 +97,7 @@ config MA35D1_AMPM
 config MA35_AMP
 	tristate "MA35 series AMP-A Driver"
 	depends on (ARCH_MA35D1 || ARCH_MA35D0 || ARCH_MA35H0)
+	default y
 	select RPMSG
 	select RPMSG_CTRL
 	select RPMSG_CHAR

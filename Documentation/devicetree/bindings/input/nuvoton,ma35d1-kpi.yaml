@@ -1,0 +1,106 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/input/nuvoton,ma35d1-kpi.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Nuvoton MA35 Series Keypad Controller
+
+maintainers:
+  - Nuvoton Technology Corporation <cwweng@nuvoton.com>
+
+allOf:
+  - $ref: matrix-keymap.yaml#
+
+properties:
+  compatible:
+    enum:
+      - nuvoton,ma35d1-kpi
+      - nuvoton,ma35d0-kpi
+      - nuvoton,ma35h0-kpi
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    maxItems: 1
+
+  assigned-clocks:
+    maxItems: 1
+
+  assigned-clock-parents:
+    maxItems: 1
+
+  debounce-period:
+    description: |
+      Debounce period setting for key scan.
+        0  = disable debounce
+        3  = debounce period is 8 clocks
+        4  = debounce period is 16 clocks
+        5  = debounce period is 32 clocks
+        6  = debounce period is 64 clocks
+        7  = debounce period is 128 clocks
+        8  = debounce period is 256 clocks
+        9  = debounce period is 512 clocks
+        10 = debounce period is 1024 clocks
+        11 = debounce period is 2048 clocks
+        12 = debounce period is 4096 clocks
+        13 = debounce period is 8192 clocks
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 0
+    maximum: 13
+
+  pre-scale:
+    description: |
+      Pre-scale value, ranging from 1 to 256.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 1
+    maximum: 256
+
+  pre-scalediv:
+    description: |
+      Pre-scale divider value, ranging from 1 to 256.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 1
+    maximum: 256
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - keypad,num-rows
+  - keypad,num-columns
+  - linux,keymap
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/arm-gic.h>
+    #include <dt-bindings/input/input.h>
+    #include <dt-bindings/input/matrix-keymap.h>
+
+    keypad@404a0000 {
+        compatible = "nuvoton,ma35d1-kpi";
+        reg = <0x0 0x404a0000 0x0 0x10000>;
+        interrupts = <GIC_SPI 79 IRQ_TYPE_LEVEL_HIGH>;
+        clocks = <&clk KPI_GATE>;
+        assigned-clocks = <&clk KPI_MUX>;
+        assigned-clock-parents = <&clk HXT>;
+        keypad,num-rows = <4>;
+        keypad,num-columns = <4>;
+        linux,keymap = 
+            MATRIX_KEY(0x00, 0x02, KEY_F)
+            MATRIX_KEY(0x00, 0x03, KEY_HOME)
+            MATRIX_KEY(0x01, 0x00, KEY_A)
+            MATRIX_KEY(0x01, 0x01, KEY_1)
+        >;
+        debounce-period = <1>;
+        pre-scale = <1>;
+        pre-scalediv = <32>;
+        status = "okay";
+    };

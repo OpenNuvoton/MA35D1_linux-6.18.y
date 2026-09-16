@@ -71,5 +71,5 @@ obj-$(CONFIG_KEYBOARD_TM2_TOUCHKEY)	+= tm2-touchkey.o
 obj-$(CONFIG_KEYBOARD_TWL4030)		+= twl4030_keypad.o
 obj-$(CONFIG_KEYBOARD_XTKBD)		+= xtkbd.o
 obj-$(CONFIG_KEYBOARD_MA35D1)		+= ma35d1_keypad.o
-obj-$(CONFIG_KEYBOARD_MA35D0)		+= ma35d0_keypad.o
-obj-$(CONFIG_KEYBOARD_MA35H0)		+= ma35h0_keypad.o
+obj-$(CONFIG_KEYBOARD_MA35D0)		+= ma35d1_keypad.o
+obj-$(CONFIG_KEYBOARD_MA35H0)		+= ma35d1_keypad.o

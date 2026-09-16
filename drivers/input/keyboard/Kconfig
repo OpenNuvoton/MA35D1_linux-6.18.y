@@ -795,6 +795,7 @@ config KEYBOARD_CYPRESS_SF
 config KEYBOARD_MA35D1
 	tristate "nuvoton ma35d1 keypad driver"
 	depends on ARCH_MA35D1
+	default y
 	select INPUT_MATRIXKMAP
 	help
 	  Say Y here if you want to use Nuvoton MA35D1 keypad.
@@ -805,6 +806,7 @@ config KEYBOARD_MA35D1
 config KEYBOARD_MA35D0
 	tristate "nuvoton ma35d0 keypad driver"
 	depends on ARCH_MA35D0
+	default y
 	select INPUT_MATRIXKMAP
 	help
 	  Say Y here if you want to use Nuvoton MA35D0 keypad.
@@ -815,6 +817,7 @@ config KEYBOARD_MA35D0
 config KEYBOARD_MA35H0
 	tristate "nuvoton ma35h0 keypad driver"
 	depends on ARCH_MA35H0
+	default y
 	select INPUT_MATRIXKMAP
 	help
 	  Say Y here if you want to use Nuvoton MA35H0 keypad.

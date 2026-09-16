@@ -15,6 +15,7 @@
 
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/dma/nuvoton,ma35-pdma.h>
 #include <dt-bindings/clock/nuvoton,ma35d0-clk.h>
 #include <dt-bindings/reset/nuvoton,ma35d0-reset.h>
 #include <dt-bindings/pinctrl/ma35d0-pinfunc.h>
@@ -115,7 +116,7 @@
 		#size-cells = <2>;
 		ranges;
 		amp_buf: amp_buf@0 {
-			reg = <0x0 0x84000000 0x0 0x8800>;
+			reg = <0x0 0x84000000 0x0 0x9000>;
 			no-map;
 		};
 	};
@@ -156,6 +157,8 @@
 		interrupts = <GIC_SPI 59 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk UART0_GATE>;
 		port-number = <0>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_UART0_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_UART0_RX>;
 		pdma-enable = <0>;
 		status = "okay";
 	};
@@ -166,6 +169,8 @@
 		interrupts = <GIC_SPI 63 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk UART4_GATE>;
 		port-number = <4>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_UART4_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_UART4_RX>;
 		pdma-enable = <0>;
 		status = "disabled";
 	};
@@ -176,6 +181,8 @@
 		interrupts = <GIC_SPI 64 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk UART5_GATE>;
 		port-number = <5>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_UART5_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_UART5_RX>;
 		pdma-enable = <0>;
 		status = "disabled";
 	};
@@ -186,6 +193,8 @@
 		interrupts = <GIC_SPI 91 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk UART6_GATE>;
 		port-number = <6>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_UART6_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_UART6_RX>;
 		pdma-enable = <0>;
 		status = "disabled";
 	};
@@ -196,6 +205,8 @@
 		interrupts = <GIC_SPI 93 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk UART8_GATE>;
 		port-number = <8>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_UART8_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_UART8_RX>;
 		pdma-enable = <0>;
 		status = "disabled";
 	};
@@ -206,6 +217,8 @@
 		interrupts = <GIC_SPI 94 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk UART9_GATE>;
 		port-number = <9>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_UART9_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_UART9_RX>;
 		pdma-enable = <0>;
 		status = "disabled";
 	};
@@ -216,6 +229,8 @@
 		interrupts = <GIC_SPI 95 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk UART10_GATE>;
 		port-number = <10>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_UART10_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_UART10_RX>;
 		pdma-enable = <0>;
 
 		/* wakeup-enable = <cts-wakeup fifo-threshold-wakeup fifo-timeout-wakeup> */
@@ -234,6 +249,8 @@
 		interrupts = <GIC_SPI 118 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk UART12_GATE>;
 		port-number = <12>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_UART12_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_UART12_RX>;
 		pdma-enable = <0>;
 		status = "disabled";
 	};
@@ -244,6 +261,8 @@
 		interrupts = <GIC_SPI 120 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk UART14_GATE>;
 		port-number = <14>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_UART14_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_UART14_RX>;
 		pdma-enable = <0>;
 		status = "disabled";
 	};
@@ -254,6 +273,8 @@
 		interrupts = <GIC_SPI 121 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk UART15_GATE>;
 		port-number = <15>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_UART15_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_UART15_RX>;
 		pdma-enable = <0>;
 		status = "disabled";
 	};
@@ -264,6 +285,8 @@
 		interrupts = <GIC_SPI 122 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk UART16_GATE>;
 		port-number = <16>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_UART16_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_UART16_RX>;
 		pdma-enable = <0>;
 		status = "disabled";
 	};
@@ -280,7 +303,7 @@
 		clock-names = "hclk", "cclk";
 		bosch,mram-cfg = <0x0 4 4 32 32 32 8 8>;
 
-		status = "disable";
+		status = "disabled";
 	};
 
 	can1: can@403D0000 {
@@ -295,7 +318,7 @@
 		clock-names = "hclk", "cclk";
 		bosch,mram-cfg = <0x0 4 4 32 32 32 8 8>;
 
-		status = "disable";
+		status = "disabled";
 	};
 
 	can3: can@403F0000 {
@@ -310,7 +333,7 @@
 		clock-names = "hclk", "cclk";
 		bosch,mram-cfg = <0x0 4 4 32 32 32 8 8>;
 
-		status = "disable";
+		status = "disabled";
 	};
 
 	ehci0: ehci@40140000 {
@@ -378,7 +401,7 @@
 		interrupts = <GIC_SPI 39 IRQ_TYPE_LEVEL_HIGH>;
 		rsa_ioctl = "yes";           /* yes: RSA via ioctl, no: RSA via akcipher   */
 		ecc_ioctl = "yes";           /* yes: ECC via ioctl, no: ECDH via akcipher */
-		status = "disable";
+		status = "disabled";
 	};
 
 	/* Key Store */
@@ -474,7 +497,7 @@
 		resets = <&reset MA35D0_RESET_I2C0>;
 		#address-cells = <1>;
 		#size-cells = <0>;
-		status = "disable";
+		status = "disabled";
 	};
 
 	i2c4: i2c@40840000 {
@@ -486,7 +509,7 @@
 		resets = <&reset MA35D0_RESET_I2C4>;
 		#address-cells = <1>;
 		#size-cells = <0>;
-		status = "disable";
+		status = "disabled";
 	};
 
 	i2c5: i2c@40850000 {
@@ -498,31 +521,21 @@
 		resets = <&reset MA35D0_RESET_I2C5>;
 		#address-cells = <1>;
 		#size-cells = <0>;
-		status = "disable";
+		status = "disabled";
 	};
 
 	i2s0: i2s@40480000 {
-		compatible = "nuvoton,ma35d0-audio-i2s";
+		compatible = "nuvoton,ma35d0-i2s";
 		reg = <0x0 0x40480000 0x0 0x10000>;
 		interrupts = <GIC_SPI 70 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk I2S0_GATE>;
 		resets = <&reset MA35D0_RESET_I2S0>;
-		pdma_reqsel_tx = <86>;
-		pdma_reqsel_rx = <87>;
-		mclk_out = <12000000>;
-		status = "disable";
-	};
-
-	i2s_pcm: i2s_pcm {
-		compatible = "nuvoton,ma35d0-audio-pcm";
-		status = "disable";
-	};
-
-	sound: sound {
-		compatible = "nuvoton,ma35d0-audio";
-		i2s-controller = <&i2s0>;
-		i2s-platform = <&i2s_pcm>;
-		status = "disable";
+		dmas = <&pdma2 0>, <&pdma2 1>;
+		dma-names = "tx", "rx";
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_I2S0_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_I2S0_RX>;
+		#sound-dai-cells = <0>;
+		status = "disabled";
 	};
 
 	hwsem: hwspinlock@40380000 {
@@ -563,25 +576,26 @@
 		reg = <0x0 0x40120000 0x0 0x10000>;
 		interrupts = <GIC_SPI 23 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "macirq";
-		phy-mode = "rmii";
-		nuvoton,sys = <&sys 0>;
 		clocks = <&clk EMAC0_GATE>, <&clk EPLL_DIV8>;
 		clock-names = "stmmaceth", "ptp_ref";
+
+		nuvoton,sys = <&sys 0>;
 		resets = <&reset MA35D0_RESET_EMAC0>;
 		reset-names = "stmmaceth";
-		clk_csr = <4>;
-		status = "disable";
+
+		phy-mode = "rmii";
 		phy-handle = <&eth_phy0>;
-		mdio0 {
+		status = "disabled";
+
+		mdio0: mdio {
 			compatible = "snps,dwmac-mdio";
 			#address-cells = <1>;
 			#size-cells = <0>;
 
 			eth_phy0: ethernet-phy@0 {
-				reg = <1>;
+				reg = <0>;
 			};
 		};
-
 	};
 
 	emac1: ethernet@40130000 {
@@ -589,26 +603,26 @@
 		reg = <0x0 0x40130000 0x0 0x10000>;
 		interrupts = <GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "macirq";
-		phy-mode = "rmii";
-		nuvoton,sys = <&sys 1>;
 		clocks = <&clk EMAC1_GATE>, <&clk EPLL_DIV8>;
 		clock-names = "stmmaceth", "ptp_ref";
+
+		nuvoton,sys = <&sys 1>;
 		resets = <&reset MA35D0_RESET_EMAC1>;
 		reset-names = "stmmaceth";
-		mac-id = <1>;
-		clk_csr = <4>;
-		status = "disable";
+
+		phy-mode = "rmii";
 		phy-handle = <&eth_phy1>;
-		mdio1 {
+		status = "disabled";
+
+		mdio1: mdio {
 			compatible = "snps,dwmac-mdio";
 			#address-cells = <1>;
 			#size-cells = <0>;
 
 			eth_phy1: ethernet-phy@1 {
-				reg = <2>;
+				reg = <1>;
 			};
 		};
-
 	};
 
 	pinctrl: pinctrl {
@@ -1000,7 +1014,7 @@
 				};
 				rootfs@1c00000 {
 					label = "nand-rootfs";
-					reg = <0x1C00000 0x6400000>;
+					reg = <0x1C00000 0x0>;
 				};
 			};
 		};
@@ -1293,17 +1307,8 @@
 		clocks = <&clk QSPI0_GATE>;
 		dmas = <&pdma1 0>,<&pdma1 1>;
 		dma-names = "tx","rx";
-		pdma_reqsel_tx = <54>;
-		pdma_reqsel_rx = <55>;
-		use_pdma = <1>;
-		num_cs = <2>;
-		lsb = <0>;
-		sleep = <0>;
-		txbitlen = <8>;
-		quad = <0>;
-		bus_num = <0>;
-		spimode = <0>;
-		mrxphase = <0>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_QSPI0_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_QSPI0_RX>;
 		status = "disabled";
 
 		#address-cells = <1>;
@@ -1311,8 +1316,10 @@
 
 		flash: flash@0 {
 			compatible = "spi-nand";
-			reg = <0 0x0 0x2000000>;
-			spi-max-frequency = <50000000>;
+			reg = <0>;
+			spi-max-frequency = <30000000>;
+			spi-rx-bus-width = <4>;
+
 			#address-cells = <1>;
 			#size-cells = <1>;
 
@@ -1352,17 +1359,9 @@
 		clocks = <&clk SPI0_GATE>;
 		dmas = <&pdma1 4>,<&pdma1 5>;
 		dma-names = "tx","rx";
-		pdma_reqsel_tx = <60>;
-		pdma_reqsel_rx = <61>;
-		use_pdma = <0>;
-		num_cs = <2>;
-		lsb = <0>;
-		sleep = <0>;
-		txbitlen = <8>;
-		bus_num = <2>;
-		spimode = <0>;
-		mrxphase = <0>;
-		spi-max-frequency = <10000000>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_SPI0_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_SPI0_RX>;
+		spi-max-frequency = <30000000>;
 		status = "disabled";
 	};
 
@@ -1373,17 +1372,9 @@
 		clocks = <&clk SPI1_GATE>;
 		dmas = <&pdma1 6>,<&pdma1 7>;
 		dma-names = "tx","rx";
-		pdma_reqsel_tx = <62>;
-		pdma_reqsel_rx = <63>;
-		use_pdma = <0>;
-		num_cs = <2>;
-		lsb = <0>;
-		sleep = <0>;
-		txbitlen = <8>;
-		bus_num = <3>;
-		spimode = <0>;
-		mrxphase = <0>;
-		spi-max-frequency = <10000000>;
+		nuvoton,pdma-reqsel-tx = <MA35_PDMA_REQ_SPI1_TX>;
+		nuvoton,pdma-reqsel-rx = <MA35_PDMA_REQ_SPI1_RX>;
+		spi-max-frequency = <30000000>;
 		status = "disabled";
 	};
 
@@ -1408,16 +1399,6 @@
 		status = "disabled";
 	};
 
-	eadc0: eadc0@40430000 {
-		compatible = "nuvoton,ma35d0-eadc";
-		reg = <0x0 0x40430000 0x0 0x10000>;
-		interrupts = <GIC_SPI 65 IRQ_TYPE_LEVEL_HIGH>;
-		clocks = <&clk EADC_GATE>;
-		clock-names = "eadc_gate";
-		eadc-frequency = <10000000>;
-		eadc-channels = <0 1 2 3 4 5 6 7>;
-		status = "disabled";
-	};
 
 	adc0: adc@40420000 {
 		// To use hybrid ADC driver (IIO+TS) for touch screen, change
