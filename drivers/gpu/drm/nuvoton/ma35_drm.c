@@ -58,9 +58,7 @@ static __maybe_unused void ma35_fbdev_backup_memory(struct ma35_drm *priv, struc
 }
 
 static struct drm_driver ma35_drm_driver = {
-	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC |
-						  DRIVER_CURSOR_HOTSPOT, // this create offset property
-
+	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
 	.fops				= &ma35_drm_fops,
 	.name				= "ma35-drm",
 	.desc				= "Nuvoton MA35 series DRM driver",
