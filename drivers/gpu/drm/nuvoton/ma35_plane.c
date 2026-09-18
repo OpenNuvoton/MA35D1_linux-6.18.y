@@ -967,7 +967,7 @@ int ma35_plane_init(struct ma35_drm *priv)
 		if (!ma35_of_node_is_layer(layer_node))
 			continue;
 
-		ret = of_property_read_u32(layer_node, "layer-id", &index); // index in layer node
+		ret = of_property_read_u32(layer_node, "reg", &index); // index in layer node
 		if (ret)
 			continue;
 

@@ -1746,17 +1746,17 @@
 				#size-cells = <0>;
 
 				layer@0 {
-					layer-id = <0>;
+					reg = <0>;
 					layer-type = "primary";
 				};
 
 				layer@1 {
-					layer-id = <1>;
+					reg = <1>;
 					layer-type = "overlay";
 				};
 
 				layer@2 {
-					layer-id = <2>;
+					reg = <2>;
 					layer-type = "cursor";
 					HOTSPOT_X = <0>;
 					HOTSPOT_Y = <0>;

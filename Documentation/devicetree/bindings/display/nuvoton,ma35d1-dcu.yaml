@@ -93,15 +93,9 @@ properties:
         properties:
           reg:
             maxItems: 1
-            description: Layer index, must match the unit address.
-
-          layer-id:
-            $ref: /schemas/types.yaml#/definitions/uint32
-            minimum: 0
-            maximum: 2
             description:
               Hardware layer index. 0 is the primary layer, 1 the overlay,
-              2 the cursor layer.
+              2 the cursor layer. Must match the unit address.
 
           layer-type:
             $ref: /schemas/types.yaml#/definitions/string
@@ -113,9 +107,20 @@ properties:
               Functional role of this layer. Exactly one layer must be
               "primary". At most one layer may be "cursor".
 
+          HOTSPOT_X:
+            $ref: /schemas/types.yaml#/definitions/uint32
+            description:
+              Cursor hotspot X offset in pixels. Only valid when
+              layer-type is "cursor". Defaults to 0.
+
+          HOTSPOT_Y:
+            $ref: /schemas/types.yaml#/definitions/uint32
+            description:
+              Cursor hotspot Y offset in pixels. Only valid when
+              layer-type is "cursor". Defaults to 0.
+
         required:
           - reg
-          - layer-id
           - layer-type
 
         additionalProperties: false
@@ -157,20 +162,19 @@ examples:
 
             layer@0 {
                 reg = <0>;
-                layer-id = <0>;
                 layer-type = "primary";
             };
 
             layer@1 {
                 reg = <1>;
-                layer-id = <1>;
                 layer-type = "overlay";
             };
 
             layer@2 {
                 reg = <2>;
-                layer-id = <2>;
                 layer-type = "cursor";
+                HOTSPOT_X = <0>;
+                HOTSPOT_Y = <0>;
             };
         };
 
