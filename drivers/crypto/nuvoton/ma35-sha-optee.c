@@ -14,6 +14,7 @@
 #include <linux/kernel.h>
 #include <linux/spinlock.h>
 #include <linux/scatterlist.h>
+#include <linux/workqueue.h>
 #include <crypto/scatterwalk.h>
 #include <linux/tee_drv.h>
 #include <linux/crypto.h>
@@ -24,8 +25,10 @@
 #include <crypto/sm3.h>
 #include <crypto/md5.h>
 #include <crypto/internal/hash.h>
+#include <linux/unaligned.h>
 
 #include "ma35-crypto.h"
+#include "ma35-crypto-optee.h"
 
 /* SHA device flags */
 #define DD_FLAGS_BUSY		BIT(0)
@@ -37,6 +40,7 @@
 #define	SHA_FLAGS_FINUP		BIT(2)  /* is a final update request */
 #define	SHA_FLAGS_FINAL		BIT(3)  /* is the final request */
 #define	SHA_FLAGS_FINAL_DMA	BIT(4)  /* is last DMA of the final request */
+#define SHA_FLAGS_TEE_SESSION	BIT(5)  /* owned by this initialized stream */
 
 struct nu_sha_drv {
 	struct list_head dev_list;
@@ -81,15 +85,139 @@ static inline u32 ma35_read_reg(struct nu_sha_dev *sha_dd, u32 reg)
 	return sha_dd->va_shm[reg/4];
 }
 
+struct ma35_sha_tee_session {
+	struct list_head list;
+	u32 sid;
+	struct nu_sha_reqctx *ctx;
+	bool close_failed;
+};
+
+struct ma35_sha_optee_state {
+	struct nu_sha_dev *dd;
+	struct workqueue_struct *wq;
+	struct work_struct queue_work;
+	struct work_struct done_work;
+	struct list_head sessions;
+	bool stopping;
+	bool registered;
+	bool dma_mapped;
+};
+
+static struct ma35_sha_optee_state sha_tee;
+
+static bool ma35_sha_tee_session_open(struct nu_sha_dev *dd,
+				       struct nu_sha_reqctx *ctx)
+{
+	struct ma35_sha_tee_session *session;
+
+	if (!(ctx->flags & SHA_FLAGS_TEE_SESSION))
+		return false;
+	list_for_each_entry(session, &sha_tee.sessions, list) {
+		if (session->ctx == ctx && session->sid == ctx->tsi_sid &&
+		    !session->close_failed)
+			return true;
+	}
+	return false;
+}
+
+static int ma35_sha_tee_close(struct nu_sha_dev *dd, u32 sid)
+{
+	struct tee_ioctl_invoke_arg arg = { };
+	struct tee_param param[4] = { };
+	struct ma35_sha_tee_session *session, *tmp;
+	int err;
+
+	list_for_each_entry(session, &sha_tee.sessions, list) {
+		if (session->sid == sid && session->close_failed)
+			return -EIO;
+	}
+	arg.func = PTA_CMD_CRYPTO_CLOSE_SESSION;
+	arg.session = dd->session_id;
+	arg.num_params = ARRAY_SIZE(param);
+	param[0].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
+	param[0].u.value.a = C_CODE_SHA;
+	param[1].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
+	param[1].u.value.a = sid;
+	err = tee_client_invoke_func(dd->octx, &arg, param);
+	if (err < 0 || arg.ret)
+		dev_err(dd->dev, "SHA close sid=%u: transport=%d PTA=%#x\n",
+			sid, err, arg.ret);
+	list_for_each_entry_safe(session, tmp, &sha_tee.sessions, list) {
+		if (session->sid != sid)
+			continue;
+		if (err < 0 || arg.ret) {
+			session->close_failed = true;
+			WRITE_ONCE(ma35_crypto_optee_faulted, true);
+			break;
+		}
+		list_del(&session->list);
+		kfree(session);
+		break;
+	}
+	return err < 0 ? err : (arg.ret ? -EIO : 0);
+}
+
+static int ma35_sha_tee_retire(struct nu_sha_dev *dd,
+				struct nu_sha_reqctx *ctx)
+{
+	struct ma35_sha_tee_session *session, *tmp;
+	int err;
+
+	list_for_each_entry_safe(session, tmp, &sha_tee.sessions, list) {
+		if (session->ctx != ctx)
+			continue;
+		err = ma35_sha_tee_close(dd, session->sid);
+		if (err)
+			return err;
+	}
+	return 0;
+}
+
+static void ma35_sha_tee_close_all(struct nu_sha_dev *dd)
+{
+	struct ma35_sha_tee_session *session;
+
+	while (!list_empty(&sha_tee.sessions)) {
+		session = list_first_entry(&sha_tee.sessions,
+					   struct ma35_sha_tee_session, list);
+		if (session->close_failed ||
+		    ma35_sha_tee_close(dd, session->sid)) {
+			dev_err(dd->dev,
+				"Unreleased SHA session %u; reboot required\n",
+				session->sid);
+			list_del(&session->list);
+			kfree(session);
+		}
+	}
+}
+
+static void ma35_sha_tee_unmap(struct nu_sha_dev *dd)
+{
+	struct nu_sha_reqctx *ctx = ahash_request_ctx(dd->req);
+	int size = ctx->flags & SHA_FLAGS_KEY_BLK ?
+		   HMAC_KEY_BUFF_SIZE : SHA_BUFF_SIZE;
+
+	if (!sha_tee.dma_mapped)
+		return;
+	dma_unmap_single(dd->dev, ctx->dma_fdbck, SHA_FDBCK_SIZE,
+			 DMA_BIDIRECTIONAL);
+	dma_unmap_single(dd->dev, ctx->dma_buff, size, DMA_TO_DEVICE);
+	sha_tee.dma_mapped = false;
+}
+
 static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 {
 	struct nu_sha_reqctx *ctx = ahash_request_ctx(dd->req);
 	struct nu_sha_ctx *tctx = crypto_tfm_ctx(dd->req->base.tfm);
 	struct tee_ioctl_invoke_arg inv_arg;
 	struct tee_param param[4];
+	struct ma35_sha_tee_session *session;
 	int  dma_cnt = 0;
 	int  err;
 
+	if (READ_ONCE(ma35_crypto_optee_faulted))
+		return -EIO;
+	sha_tee.dma_mapped = false;
 	dma_cnt = 0;
 	ctx->dma_buff = 0;
 	if (is_key_block) {
@@ -100,8 +228,6 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 			return -EINVAL;
 		}
 
-		dma_sync_single_for_cpu(dd->dev, ctx->dma_buff,
-					HMAC_KEY_BUFF_SIZE, DMA_TO_DEVICE);
 		dma_cnt = tctx->keybufcnt;
 	} else {
 		ctx->dma_buff = dma_map_single(dd->dev, ctx->buffer, SHA_BUFF_SIZE,
@@ -111,8 +237,6 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 			return -EINVAL;
 		}
 
-		dma_sync_single_for_cpu(dd->dev, ctx->dma_buff, SHA_BUFF_SIZE,
-					DMA_TO_DEVICE);
 		dma_cnt = ctx->bufcnt;
 	}
 
@@ -120,16 +244,26 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 					DMA_BIDIRECTIONAL);
 	if (unlikely(dma_mapping_error(dd->dev, ctx->dma_fdbck))) {
 		dev_err(dd->dev, "dma map bytes error\n");
+		dma_unmap_single(dd->dev, ctx->dma_buff,
+				 is_key_block ? HMAC_KEY_BUFF_SIZE : SHA_BUFF_SIZE,
+				 DMA_TO_DEVICE);
 		return -EINVAL;
 	}
-
-	dma_sync_single_for_cpu(dd->dev, ctx->dma_buff, dma_cnt, DMA_FROM_DEVICE);
+	sha_tee.dma_mapped = true;
 
 	ctx->reg_ctl |= HMAC_CTL_INSWAP | HMAC_CTL_OUTSWAP | HMAC_CTL_FBOUT |
 			HMAC_CTL_DMACSCAD | HMAC_CTL_DMAEN | HMAC_CTL_START;
-	ctx->reg_ctl |= tctx->hash_mode; /* HMAC/SHA3/SM3/MD5 */
+	ctx->reg_ctl |= ctx->op; /* HMAC/SHA3/SM3/MD5 */
 
 	if (ctx->flags & SHA_FLAGS_FIRST) {
+		err = ma35_sha_tee_retire(dd, ctx);
+		if (err)
+			goto tee_error;
+		session = kzalloc(sizeof(*session), GFP_KERNEL);
+		if (!session) {
+			err = -ENOMEM;
+			goto tee_error;
+		}
 		ctx->reg_ctl |= HMAC_CTL_DMAFIRST;
 	} else {
 		ctx->reg_ctl &= ~HMAC_CTL_DMAFIRST;
@@ -143,7 +277,7 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 			ctx->reg_ctl &= ~HMAC_CTL_DMACSCAD;
 	}
 
-	if ((tctx->hash_mode & HMAC_CTL_SHA3EN) && (ctx->bufcnt == 0)) {
+	if ((ctx->op & HMAC_CTL_SHA3EN) && (ctx->bufcnt == 0)) {
 		/* workaround for MA35D1 SHA3 in case of DMACNT is 0 */
 		ctx->reg_ctl |= HMAC_CTL_DMACSCAD;
 	}
@@ -185,11 +319,20 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 
 		err = tee_client_invoke_func(dd->octx, &inv_arg, param);
 		if ((err < 0) || (inv_arg.ret != 0)) {
-			pr_err("PTA_CMD_CRYPTO_OPEN_SESSION err: %x\n",
-				inv_arg.ret);
-			return -EINVAL;
+			dev_err(dd->dev,
+				"SHA open failed: transport=%d PTA=%#x\n",
+				err, inv_arg.ret);
+			if (err < 0)
+				WRITE_ONCE(ma35_crypto_optee_faulted, true);
+			kfree(session);
+			err = err < 0 ? err : -EIO;
+			goto tee_error;
 		}
 		ctx->tsi_sid = param[1].u.value.a;
+		session->sid = ctx->tsi_sid;
+		session->ctx = ctx;
+		list_add_tail(&session->list, &sha_tee.sessions);
+		ctx->flags |= SHA_FLAGS_TEE_SESSION;
 
 		/*
 		 * Invoke PTA_CMD_CRYPTO_SHA_START
@@ -214,8 +357,11 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 
 		err = tee_client_invoke_func(dd->octx, &inv_arg, param);
 		if ((err < 0) || (inv_arg.ret != 0)) {
-			pr_err("PTA_CMD_CRYPTO_SHA_START err: %x\n", inv_arg.ret);
-			return -EINVAL;
+			dev_err(dd->dev,
+				"SHA start sid=%u: transport=%d PTA=%#x\n",
+				ctx->tsi_sid, err, inv_arg.ret);
+			err = err < 0 ? err : -EIO;
+			goto tee_error;
 		}
 	}
 
@@ -245,42 +391,27 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 
 	err = tee_client_invoke_func(dd->octx, &inv_arg, param);
 	if ((err < 0) || (inv_arg.ret != 0)) {
-		pr_err("PTA_CMD_CRYPTO_SHA_%s err: %x\n",
-			(ctx->flags & SHA_FLAGS_FINAL_DMA) ? "FINAL" : "UPDATE",
-			inv_arg.ret);
-		return -EINVAL;
+		dev_err(dd->dev,
+			"SHA run sid=%u: transport=%d PTA=%#x\n",
+			ctx->tsi_sid, err, inv_arg.ret);
+		err = err < 0 ? err : -EIO;
+		goto tee_error;
 	}
 
 	if (ctx->flags & SHA_FLAGS_FINAL_DMA) {
-		/*
-		 * Close the crypto session
-		 */
-		memset(&inv_arg, 0, sizeof(inv_arg));
-		memset(&param, 0, sizeof(param));
-
-		/* Invoke PTA_CMD_CRYPTO_CLOSE_SESSION function of PTA */
-		inv_arg.func = PTA_CMD_CRYPTO_CLOSE_SESSION;
-		inv_arg.session = dd->session_id;
-		inv_arg.num_params = 4;
-
-		/* Fill invoke cmd params */
-		param[0].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
-		param[1].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
-
-		param[0].u.value.a = C_CODE_SHA;
-		param[1].u.value.a = ctx->tsi_sid;
-
-		err = tee_client_invoke_func(dd->octx, &inv_arg, param);
-		if ((err < 0) || (inv_arg.ret != 0)) {
-			pr_err("PTA_CMD_CRYPTO_CLOSE_SESSION err: %x\n",
-				inv_arg.ret);
-			return -EINVAL;
-		}
+		err = ma35_sha_tee_close(dd, ctx->tsi_sid);
+		ctx->flags &= ~SHA_FLAGS_TEE_SESSION;
+		if (err)
+			goto tee_error;
 	}
 
-	tasklet_schedule(&dd->done_task);
+	queue_work(sha_tee.wq, &sha_tee.done_work);
 
 	return -EINPROGRESS;
+
+tee_error:
+	ma35_sha_tee_unmap(dd);
+	return err;
 }
 
 /*
@@ -289,14 +420,13 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 static void  ma35_sha_get_result(struct ahash_request *req)
 {
 	struct nu_sha_reqctx *ctx = ahash_request_ctx(req);
-	u32 *result = (u32 *)req->result;
+	u8 *result = req->result;
 	int i;
 
 	/* Get the hash from the digest buffer */
 	for (i = 0; i < ctx->digest_len/4; i++)
-		result[i] = ma35_read_reg(ctx->dd, HMAC_DGST(i));
-	pr_debug("Digest: %08x %08x %08x %08x %08x\n", result[0], result[1], result[2],
-		 result[3], result[4]);
+		put_unaligned(ma35_read_reg(ctx->dd, HMAC_DGST(i)),
+			      (u32 *)(result + i * sizeof(u32)));
 }
 
 /*
@@ -306,11 +436,17 @@ static void ma35_sha_finish_req(struct nu_sha_reqctx *ctx, int err)
 {
 	struct nu_sha_dev *dd = ctx->dd;
 	struct ahash_request *req = dd->req;
+	unsigned long flags;
+
+	if (err && ma35_sha_tee_session_open(dd, ctx))
+		ma35_sha_tee_close(dd, ctx->tsi_sid);
+	if (err)
+		ctx->flags &= ~SHA_FLAGS_TEE_SESSION;
 
 	/*
 	 *  In case of error occurred or it's the completion of final request
 	 */
-	if ((ctx->flags & SHA_FLAGS_FINAL_DMA) && !err) {
+	if (err || (ctx->flags & SHA_FLAGS_FINAL_DMA)) {
 		if (!err)
 			ma35_sha_get_result(req);
 		kfree(ctx->buffer);
@@ -318,12 +454,13 @@ static void ma35_sha_finish_req(struct nu_sha_reqctx *ctx, int err)
 		ctx->bufcnt = 0;
 	}
 
+	spin_lock_irqsave(&dd->lock, flags);
+	dd->req = NULL;
+	dd->flags &= ~DD_FLAGS_BUSY;
+	spin_unlock_irqrestore(&dd->lock, flags);
 	ahash_request_complete(req, err);
 
-	dd->flags &= ~DD_FLAGS_BUSY;
-
-	/* Handle new request */
-	tasklet_schedule(&dd->queue_task);
+	queue_work(sha_tee.wq, &sha_tee.queue_work);
 }
 
 static int ma35_sha_init(struct ahash_request *req)
@@ -335,32 +472,38 @@ static int ma35_sha_init(struct ahash_request *req)
 	struct hash_alg_common *halg = crypto_hash_alg_common(tfm);
 	char *cra_name = halg->base.cra_name;
 	bool is_sha3 = false;
-	int klen, plen;
+	gfp_t gfp;
 
-	tctx->hash_mode = 0;
+	if (dd && READ_ONCE(ma35_crypto_optee_faulted))
+		return -EIO;
+	ctx->op = 0;
 	if (strncmp(cra_name, "hmac", 4) == 0) {
-		tctx->hash_mode = HMAC_CTL_HMACEN;
+		ctx->op = HMAC_CTL_HMACEN;
 		if (strncmp(cra_name+5, "sha3-", 5) == 0) {
-			tctx->hash_mode |= HMAC_CTL_SHA3EN;
+			ctx->op |= HMAC_CTL_SHA3EN;
 			is_sha3 = true;
 		}
 		if (strncmp(cra_name+5, "sm3", 3) == 0)
-			tctx->hash_mode |= HMAC_CTL_SM3EN;
+			ctx->op |= HMAC_CTL_SM3EN;
 		if (strncmp(cra_name+5, "md5", 3) == 0)
-			tctx->hash_mode |= HMAC_CTL_MD5EN;
+			ctx->op |= HMAC_CTL_MD5EN;
 	} else if (strncmp(cra_name, "sha3-", 5) == 0) {
 		is_sha3 = true;
-		tctx->hash_mode = HMAC_CTL_SHA3EN;
+		ctx->op = HMAC_CTL_SHA3EN;
 	} else if (strncmp(cra_name, "sm3", 3) == 0) {
-		tctx->hash_mode = HMAC_CTL_SM3EN;
+		ctx->op = HMAC_CTL_SM3EN;
 	} else if (strncmp(cra_name, "md5", 3) == 0) {
-		tctx->hash_mode = HMAC_CTL_MD5EN;
+		ctx->op = HMAC_CTL_MD5EN;
 	} else {
 		/* default, SHA mode */
 	}
 
-	pr_debug("[ %s ], 0x%x\n", halg->base.cra_name, tctx->hash_mode);
+	pr_debug("[ %s ], 0x%x\n", halg->base.cra_name, ctx->op);
 	ctx->dd = dd;
+	ctx->sg = NULL;
+	ctx->sg_off = 0;
+	ctx->req_len = 0;
+	ctx->tsi_sid = 0;
 	ctx->flags = SHA_FLAGS_FIRST;
 	ctx->reg_ctl = 0;
 	ctx->digest_len = crypto_ahash_digestsize(tfm);
@@ -405,15 +548,16 @@ static int ma35_sha_init(struct ahash_request *req)
 		return -EINVAL;
 	}
 
-	ctx->buffer = kmalloc(SHA_BUFF_SIZE, GFP_KERNEL | GFP_DMA);
+	gfp = (ahash_request_flags(req) & CRYPTO_TFM_REQ_MAY_SLEEP) ?
+		GFP_KERNEL : GFP_ATOMIC;
+	ctx->buffer = kmalloc(SHA_BUFF_SIZE, gfp | GFP_DMA);
 	if (!ctx->buffer)
 		return -ENOMEM;
 
 	ctx->bufcnt = 0;
 	ctx->dma_max_size = (SHA_BUFF_SIZE / ctx->block_size) * ctx->block_size;
 
-	if (!(tctx->hash_mode & HMAC_CTL_HMACEN)) {
-		tctx->hmac_key_len = 0;
+	if (!(ctx->op & HMAC_CTL_HMACEN)) {
 		ctx->bufcnt = 0;
 		return 0;
 	}
@@ -422,17 +566,12 @@ static int ma35_sha_init(struct ahash_request *req)
 	if (((tctx->hmac_key_len + ctx->block_size - 1) > HMAC_KEY_BUFF_SIZE) ||
 	    (tctx->hmac_key_len == 0)) {
 		pr_err("HMAC key length %d is not supported!\n", tctx->hmac_key_len);
+		kfree(ctx->buffer);
+		ctx->buffer = NULL;
 		return -EINVAL;
 	}
 
 	ctx->flags |= SHA_FLAGS_KEY_BLK;
-	klen = tctx->hmac_key_len;
-	if ((klen % ctx->block_size) != 0) {
-		/* Paading zeros to make key data be block aligned */
-		plen = ctx->block_size - (klen % ctx->block_size);
-		memset(&tctx->keybuf[tctx->keybufcnt], 0, plen);
-		tctx->keybufcnt += plen;
-	}
 	return 0;
 }
 
@@ -465,6 +604,12 @@ static int ma35_sha_update_start(struct nu_sha_dev *dd)
 	struct nu_sha_reqctx *ctx = ahash_request_ctx(dd->req);
 	int err = 0;
 
+	if (READ_ONCE(ma35_crypto_optee_faulted) ||
+	    (!(ctx->flags & SHA_FLAGS_FIRST) &&
+	     !ma35_sha_tee_session_open(dd, ctx))) {
+		ma35_sha_finish_req(ctx, -EIO);
+		return -EIO;
+	}
 	if ((ctx->req_len > 0) &&  (ctx->bufcnt < ctx->dma_max_size))
 		ma35_sha_sg_to_dma_buffer(dd->req, ctx);
 
@@ -520,14 +665,25 @@ static int ma35_sha_update_start(struct nu_sha_dev *dd)
 static int ma35_sha_handle_queue(struct nu_sha_dev *dd, struct ahash_request *req)
 {
 	struct crypto_async_request *async_req, *backlog;
-	struct nu_sha_reqctx *ctx;
 	unsigned long flags;
 	int ret = 0;
 
 	spin_lock_irqsave(&dd->lock, flags);
 
-	if (req)
+	if (req) {
+		if (sha_tee.stopping) {
+			spin_unlock_irqrestore(&dd->lock, flags);
+			return -ESHUTDOWN;
+		}
+		if (READ_ONCE(ma35_crypto_optee_faulted)) {
+			spin_unlock_irqrestore(&dd->lock, flags);
+			return -EIO;
+		}
 		ret = ahash_enqueue_request(&dd->queue, req);
+		queue_work(sha_tee.wq, &sha_tee.queue_work);
+		spin_unlock_irqrestore(&dd->lock, flags);
+		return ret;
+	}
 
 	if ((dd->flags & DD_FLAGS_BUSY)) {
 		/* SHA device is busy on a request */
@@ -550,7 +706,6 @@ static int ma35_sha_handle_queue(struct nu_sha_dev *dd, struct ahash_request *re
 		backlog->complete(backlog, -EINPROGRESS);
 
 	req = ahash_request_cast(async_req);
-	ctx = ahash_request_ctx(req);
 	dd->req = req;
 
 	return ma35_sha_update_start(dd);
@@ -631,33 +786,31 @@ static int ma35_sha_digest(struct ahash_request *req)
 static int ma35_sha_setkey(struct crypto_ahash *tfm, const u8 *key, u32 keylen)
 {
 	struct nu_sha_ctx *tctx = crypto_ahash_ctx(tfm);
+	unsigned int block_size = crypto_ahash_blocksize(tfm);
+	unsigned int padded_len;
 
-	if (keylen > HMAC_KEY_BUFF_SIZE)
+	if (keylen > HMAC_KEY_BUFF_SIZE ||
+	    (keylen && keylen + block_size - 1 > HMAC_KEY_BUFF_SIZE))
 		return -EINVAL;
 
-	if (keylen > 0) {
+	padded_len = round_up(keylen, block_size);
+	if (keylen)
 		memcpy(tctx->keybuf, key, keylen);
-		tctx->keybufcnt = keylen;
-	}
+	memset(tctx->keybuf + keylen, 0, padded_len - keylen);
 
 	tctx->hmac_key_len = keylen;
+	tctx->keybufcnt = padded_len;
 	return 0;
 }
 
 static int ma35_sha_export(struct ahash_request *req, void *out)
 {
-	const struct nu_sha_reqctx *ctx = ahash_request_ctx(req);
-
-	memcpy(out, ctx, sizeof(*ctx));
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 static int ma35_sha_import(struct ahash_request *req, const void *in)
 {
-	struct nu_sha_reqctx *ctx = ahash_request_ctx(req);
-
-	memcpy(ctx, in, sizeof(*ctx));
-	return 0;
+	return -EOPNOTSUPP;
 }
 
 static int ma35_sha_cra_init_alg(struct crypto_tfm *tfm, const char *alg_base)
@@ -701,6 +854,7 @@ static struct ahash_alg  ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA1_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -723,6 +877,7 @@ static struct ahash_alg  ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA224_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -745,6 +900,7 @@ static struct ahash_alg  ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA256_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -767,6 +923,7 @@ static struct ahash_alg  ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA384_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -789,6 +946,7 @@ static struct ahash_alg  ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA512_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -812,6 +970,7 @@ static struct ahash_alg  ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA1_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -835,6 +994,7 @@ static struct ahash_alg  ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA224_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -858,6 +1018,7 @@ static struct ahash_alg  ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA256_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -881,6 +1042,7 @@ static struct ahash_alg  ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA384_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -904,6 +1066,7 @@ static struct ahash_alg  ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA512_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -926,6 +1089,7 @@ static struct ahash_alg  ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SM3_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -948,6 +1112,7 @@ static struct ahash_alg  ma35_sha_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = MD5_HMAC_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -973,6 +1138,7 @@ static struct ahash_alg  ma35_sha3_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA3_224_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -995,6 +1161,7 @@ static struct ahash_alg  ma35_sha3_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA3_256_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -1017,6 +1184,7 @@ static struct ahash_alg  ma35_sha3_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA3_384_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
@@ -1039,19 +1207,13 @@ static struct ahash_alg  ma35_sha3_algs[] = {
 		.cra_flags       = CRYPTO_ALG_ASYNC,
 		.cra_blocksize   = SHA3_512_BLOCK_SIZE,
 		.cra_ctxsize     = sizeof(struct nu_sha_ctx),
+		.cra_alignmask   = 0,
 		.cra_module      = THIS_MODULE,
 		.cra_init        = ma35_sha_cra_init,
 		.cra_exit        = ma35_sha_cra_exit,
 	}
 },
 };
-
-static void ma35_sha_queue_task(unsigned long data)
-{
-	struct nu_sha_dev *dd = (struct nu_sha_dev *)data;
-
-	ma35_sha_handle_queue(dd, NULL);
-}
 
 /*
  *  This task is triggerred by Crypto IRQ when a SHA DMA completed.
@@ -1060,19 +1222,25 @@ static void ma35_sha_done_task(unsigned long data)
 {
 	struct nu_sha_dev *dd = (struct nu_sha_dev *)data;
 	struct nu_sha_reqctx *ctx = ahash_request_ctx(dd->req);
-	int map_size;
 
-	if (ctx->flags & SHA_FLAGS_KEY_BLK)
-		map_size = HMAC_KEY_BUFF_SIZE;
-	else
-		map_size = SHA_BUFF_SIZE;
-
-	dma_unmap_single(dd->dev, ctx->dma_fdbck, SHA_FDBCK_SIZE, DMA_BIDIRECTIONAL);
-
-	if (ctx->dma_buff != 0)
-		dma_unmap_single(dd->dev, ctx->dma_buff, map_size, DMA_TO_DEVICE);
-
+	ma35_sha_tee_unmap(dd);
 	ma35_sha_dma_complete(ctx);
+}
+
+static void ma35_sha_tee_queue_work(struct work_struct *work)
+{
+	struct ma35_sha_optee_state *tee =
+		container_of(work, struct ma35_sha_optee_state, queue_work);
+
+	ma35_sha_handle_queue(tee->dd, NULL);
+}
+
+static void ma35_sha_tee_done_work(struct work_struct *work)
+{
+	struct ma35_sha_optee_state *tee =
+		container_of(work, struct ma35_sha_optee_state, done_work);
+
+	ma35_sha_done_task((unsigned long)tee->dd);
 }
 
 static int optee_ctx_match(struct tee_ioctl_version_data *ver, const void *data)
@@ -1085,7 +1253,7 @@ static int optee_ctx_match(struct tee_ioctl_version_data *ver, const void *data)
 
 static int  ma35_optee_sha_init(struct nu_sha_dev *dd)
 {
-	struct tee_ioctl_open_session_arg sess_arg;
+	struct tee_ioctl_open_session_arg sess_arg = { };
 	int err;
 
 	err = ma35_crypto_optee_init(dd->nu_cdev);
@@ -1096,14 +1264,14 @@ static int  ma35_optee_sha_init(struct nu_sha_dev *dd)
 	 */
 	dd->octx = tee_client_open_context(NULL, optee_ctx_match, NULL, NULL);
 	if (IS_ERR(dd->octx)) {
-		pr_err("%s open context failed, err: %x\n", __func__, sess_arg.ret);
+		err = PTR_ERR(dd->octx);
+		dd->octx = NULL;
 		return err;
 	}
 
 	/*
 	 * Open SHA session with Crypto Trusted App
 	 */
-	memset(&sess_arg, 0, sizeof(sess_arg));
 	memcpy(sess_arg.uuid, dd->nu_cdev->tee_cdev->id.uuid.b, TEE_IOCTL_UUID_LEN);
 	sess_arg.clnt_login = TEE_IOCTL_LOGIN_PUBLIC;
 	sess_arg.num_params = 0;
@@ -1111,7 +1279,7 @@ static int  ma35_optee_sha_init(struct nu_sha_dev *dd)
 	err = tee_client_open_session(dd->octx, &sess_arg, NULL);
 	if ((err < 0) || (sess_arg.ret != 0)) {
 		pr_err("%s open session failed, err: %x\n", __func__, sess_arg.ret);
-		err = -EINVAL;
+		err = err < 0 ? err : -EIO;
 		goto out_ctx;
 	}
 	dd->session_id = sess_arg.session;
@@ -1121,12 +1289,13 @@ static int  ma35_optee_sha_init(struct nu_sha_dev *dd)
 	 */
 	dd->shm_pool = tee_shm_alloc_kernel_buf(dd->octx, CRYPTO_SHM_SIZE);
 	if (IS_ERR(dd->shm_pool)) {
-		pr_err("%s tee_shm_alloc failed\n", __func__);
+		err = PTR_ERR(dd->shm_pool);
 		goto out_sess;
 	}
 
 	dd->va_shm = tee_shm_get_va(dd->shm_pool, 0);
 	if (IS_ERR(dd->va_shm)) {
+		err = PTR_ERR(dd->va_shm);
 		tee_shm_free(dd->shm_pool);
 		pr_err("%s tee_shm_get_va failed\n", __func__);
 		goto out_sess;
@@ -1148,14 +1317,29 @@ static void ma35_optee_sha_exit(struct nu_sha_dev *dd)
 	dd->octx = NULL;
 }
 
+static void ma35_sha_tee_stop(struct nu_sha_dev *dd)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&dd->lock, flags);
+	sha_tee.stopping = true;
+	spin_unlock_irqrestore(&dd->lock, flags);
+	if (sha_tee.wq) {
+		destroy_workqueue(sha_tee.wq);
+		sha_tee.wq = NULL;
+	}
+	ma35_sha_tee_close_all(dd);
+}
+
 int ma35_sha_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 {
 	struct nu_sha_dev *sha_dd = &crypto_dev->sha_dd;
 	int i, err = 0;
+	int sha_registered = 0, sha3_registered = 0;
 
-#ifndef CONFIG_CRYPTO_MANAGER_DISABLE_TESTS
+#ifdef CONFIG_CRYPTO_SELFTESTS
 	/* ma35 sha-optee driver cannot pass some corner test of linux run-time test */
-	pr_err("Please enable CONFIG_CRYPTO_MANAGER_DISABLE_TESTS to have ma35 sha-optee driver support.\n");
+	pr_err("Please disable CONFIG_CRYPTO_SELFTESTS to have ma35 sha-optee driver support.\n");
 	return -EINVAL;
 #endif
 
@@ -1163,6 +1347,8 @@ int ma35_sha_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	sha_dd->nu_cdev = crypto_dev;
 	sha_dd->reg_base = crypto_dev->reg_base;
 	sha_dd->octx = NULL;
+	memset(&sha_tee, 0, sizeof(sha_tee));
+	sha_tee.dd = sha_dd;
 
 	err = ma35_optee_sha_init(sha_dd);
 	if (err)
@@ -1170,12 +1356,17 @@ int ma35_sha_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 
 
 	INIT_LIST_HEAD(&sha_dd->list);
+	INIT_LIST_HEAD(&sha_tee.sessions);
 	spin_lock_init(&sha_dd->lock);
-
-	tasklet_init(&sha_dd->done_task, ma35_sha_done_task, (unsigned long)sha_dd);
-	tasklet_init(&sha_dd->queue_task, ma35_sha_queue_task, (unsigned long)sha_dd);
-
 	crypto_init_queue(&sha_dd->queue, 32);
+	INIT_WORK(&sha_tee.queue_work, ma35_sha_tee_queue_work);
+	INIT_WORK(&sha_tee.done_work, ma35_sha_tee_done_work);
+	sha_tee.wq = alloc_ordered_workqueue("ma35-sha-optee",
+						 WQ_MEM_RECLAIM);
+	if (!sha_tee.wq) {
+		err = -ENOMEM;
+		goto err_optee;
+	}
 
 	spin_lock(&nu_sha.lock);
 	list_add_tail(&sha_dd->list, &nu_sha.dev_list);
@@ -1183,33 +1374,43 @@ int ma35_sha_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 
 	for (i = 0; i < ARRAY_SIZE(ma35_sha_algs); i++) {
 		err = crypto_register_ahash(&ma35_sha_algs[i]);
-		if (err)
+		if (err) {
+			dev_err(dev, "failed to register %s/%s: %d\n",
+				ma35_sha_algs[i].halg.base.cra_name,
+				ma35_sha_algs[i].halg.base.cra_driver_name,
+				err);
 			goto err_register;
+		}
+		sha_registered++;
 	}
 
 	for (i = 0; i < ARRAY_SIZE(ma35_sha3_algs); i++) {
 		err = crypto_register_ahash(&ma35_sha3_algs[i]);
-		if (err)
+		if (err) {
+			dev_err(dev, "failed to register %s/%s: %d\n",
+				ma35_sha3_algs[i].halg.base.cra_name,
+				ma35_sha3_algs[i].halg.base.cra_driver_name,
+				err);
 			goto err_register;
+		}
+		sha3_registered++;
 	}
 
+	sha_tee.registered = true;
 	pr_info("ma35 crypto sha optee initialized.\n");
 	return 0;
 
 err_register:
+	while (sha3_registered--)
+		crypto_unregister_ahash(&ma35_sha3_algs[sha3_registered]);
+	while (sha_registered--)
+		crypto_unregister_ahash(&ma35_sha_algs[sha_registered]);
 	spin_lock(&nu_sha.lock);
 	list_del(&sha_dd->list);
 	spin_unlock(&nu_sha.lock);
-
-	tasklet_kill(&sha_dd->queue_task);
-	tasklet_kill(&sha_dd->done_task);
-
-	for (i = 0; i < ARRAY_SIZE(ma35_sha_algs); i++)
-		crypto_unregister_ahash(&ma35_sha_algs[i]);
-
-	for (i = 0; i < ARRAY_SIZE(ma35_sha3_algs); i++)
-		crypto_unregister_ahash(&ma35_sha3_algs[i]);
-
+	ma35_sha_tee_stop(sha_dd);
+err_optee:
+	ma35_optee_sha_exit(sha_dd);
 	dev_err(dev, "SHA initialization failed. %d\n", err);
 
 	return err;
@@ -1220,8 +1421,10 @@ int ma35_sha_optee_remove(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	struct nu_sha_dev *sha_dd = &crypto_dev->sha_dd;
 	int i;
 
-	if (sha_dd == NULL)
-		return -ENODEV;
+	if (!sha_tee.registered)
+		return 0;
+
+	ma35_sha_tee_stop(sha_dd);
 
 	for (i = 0; i < ARRAY_SIZE(ma35_sha_algs); i++)
 		crypto_unregister_ahash(&ma35_sha_algs[i]);
@@ -1233,10 +1436,8 @@ int ma35_sha_optee_remove(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	list_del(&sha_dd->list);
 	spin_unlock(&nu_sha.lock);
 
-	tasklet_kill(&sha_dd->done_task);
-	tasklet_kill(&sha_dd->queue_task);
-
 	ma35_optee_sha_exit(sha_dd);
+	sha_tee.registered = false;
 
 	return 0;
 }

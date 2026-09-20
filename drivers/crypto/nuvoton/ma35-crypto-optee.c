@@ -20,11 +20,18 @@
 #include <linux/tee_drv.h>
 #include <linux/crypto.h>
 #include <linux/spinlock.h>
+#include <linux/mutex.h>
 #include <crypto/algapi.h>
 
 #include "ma35-crypto.h"
+#include "ma35-crypto-optee.h"
 
-static struct nu_crypto_dev *_ma35_crypto_optee_dev;
+bool ma35_crypto_optee_faulted;
+
+static DEFINE_MUTEX(optee_register_lock);
+static DEFINE_MUTEX(optee_ready_lock);
+static bool optee_driver_registered;
+static struct tee_client_device *optee_ready_device;
 
 static int optee_ctx_match(struct tee_ioctl_version_data *ver, const void *data)
 {
@@ -36,19 +43,15 @@ static int optee_ctx_match(struct tee_ioctl_version_data *ver, const void *data)
 
 static int optee_crypto_probe(struct device *dev)
 {
-	struct nu_crypto_dev *crypto_dev;
 	struct tee_client_device *tee_cdev; // = to_tee_client_device(dev);
 	struct tee_context *ctx;
 	u32 session_id;
 	struct tee_ioctl_invoke_arg inv_arg;
-	struct tee_ioctl_open_session_arg sess_arg;
+	struct tee_ioctl_open_session_arg sess_arg = { };
 	struct tee_param param[4];
 	int ret;
 
-	crypto_dev = _ma35_crypto_optee_dev;
-
 	tee_cdev = to_tee_client_device(dev);
-	crypto_dev->tee_cdev = tee_cdev;
 
 	/*
 	 * Open context with TEE driver
@@ -90,11 +93,20 @@ static int optee_crypto_probe(struct device *dev)
 	}
 	tee_client_close_session(ctx, session_id);
 	tee_client_close_context(ctx);
+	if (!ret) {
+		mutex_lock(&optee_ready_lock);
+		optee_ready_device = tee_cdev;
+		mutex_unlock(&optee_ready_lock);
+	}
 	return ret;
 }
 
 static int optee_crypto_remove(struct device *dev)
 {
+	mutex_lock(&optee_ready_lock);
+	if (optee_ready_device == to_tee_client_device(dev))
+		optee_ready_device = NULL;
+	mutex_unlock(&optee_ready_lock);
 	return 0;
 }
 
@@ -117,17 +129,38 @@ static struct tee_client_driver optee_crypto_driver = {
 
 int ma35_crypto_optee_init(struct nu_crypto_dev *crypto_dev)
 {
-	int err;
+	struct tee_client_device *tee_cdev;
+	int err = 0;
 
+	if (READ_ONCE(ma35_crypto_optee_faulted))
+		return -EIO;
 	if (crypto_dev->tee_cdev != NULL)
 		return 0; /* already inited */
 
-	pr_info("Register MA35D1 Crypto optee client driver.\n");
-	err = driver_register(&optee_crypto_driver.driver);
-	if (err) {
-		pr_err("Failed to register crypto optee driver!\n");
-		return err;
+	mutex_lock(&optee_register_lock);
+	if (!optee_driver_registered) {
+		err = driver_register(&optee_crypto_driver.driver);
+		if (!err)
+			optee_driver_registered = true;
 	}
+	mutex_unlock(&optee_register_lock);
+	if (err)
+		return err;
+
+	mutex_lock(&optee_ready_lock);
+	tee_cdev = optee_ready_device;
+	if (tee_cdev)
+		get_device(&tee_cdev->dev);
+	mutex_unlock(&optee_ready_lock);
+	if (!tee_cdev)
+		return -EPROBE_DEFER;
+
+	if (!device_link_add(crypto_dev->dev, &tee_cdev->dev,
+			     DL_FLAG_AUTOREMOVE_CONSUMER)) {
+		put_device(&tee_cdev->dev);
+		return -ENOMEM;
+	}
+	crypto_dev->tee_cdev = tee_cdev;
 	return 0;
 }
 
@@ -142,8 +175,11 @@ static int ma35_crypto_optee_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	dev_set_drvdata(dev, crypto_dev);
+	crypto_dev->dev = dev;
 
-	_ma35_crypto_optee_dev = crypto_dev;
+	err = ma35_crypto_optee_init(crypto_dev);
+	if (err)
+		return err;
 
 	crypto_dev->ecc_ioctl = true;
 	crypto_dev->rsa_ioctl = true;
@@ -180,6 +216,8 @@ static void ma35_crypto_optee_remove(struct platform_device *pdev)
 	ma35_sha_optee_remove(&pdev->dev, crypto_dev);
 	ma35_ecc_optee_remove(&pdev->dev, crypto_dev);
 	ma35_rsa_optee_remove(&pdev->dev, crypto_dev);
+	put_device(&crypto_dev->tee_cdev->dev);
+	crypto_dev->tee_cdev = NULL;
 }
 
 static const struct of_device_id ma35_crypto_optee_of_match[] = {
@@ -208,6 +246,8 @@ static int __init ma35_crypto_platform_driver_init(void)
 static void __exit ma35_crypto_platform_driver_exit(void)
 {
 	platform_driver_unregister(&ma35_crypto_optee_driver);
+	if (optee_driver_registered)
+		driver_unregister(&optee_crypto_driver.driver);
 }
 
 late_initcall(ma35_crypto_platform_driver_init);

@@ -20,6 +20,7 @@
 #include <linux/crypto.h>
 #include <linux/spinlock.h>
 #include <linux/scatterlist.h>
+#include <linux/workqueue.h>
 #include <crypto/scatterwalk.h>
 #include <crypto/aes.h>
 #include <crypto/gcm.h>
@@ -32,10 +33,74 @@
 #include <linux/clk.h>
 
 #include "ma35-crypto.h"
+#include "ma35-crypto-optee.h"
 
 #define AES_FLAGS_BUSY		BIT(1)
 
 static u8  g_zeros[16] = { 0 };
+
+struct ma35_aes_reqctx {
+	u32 mode;
+};
+
+struct ma35_aes_optee_state {
+	struct nu_aes_dev *dd;
+	struct workqueue_struct *wq;
+	struct work_struct queue_work;
+	struct work_struct done_work;
+	bool stopping;
+	bool registered;
+	bool dma_mapped;
+	bool session_open;
+	bool close_failed;
+	int err;
+};
+
+static struct ma35_aes_optee_state aes_tee;
+
+static int ma35_aes_tee_session(struct nu_aes_dev *dd, bool open)
+{
+	struct tee_ioctl_invoke_arg arg = { };
+	struct tee_param param[4] = { };
+	int err;
+
+	if (!open && !aes_tee.session_open)
+		return 0;
+	if ((open && READ_ONCE(ma35_crypto_optee_faulted)) ||
+	    (!open && aes_tee.close_failed))
+		return -EIO;
+
+	arg.func = open ? PTA_CMD_CRYPTO_OPEN_SESSION :
+			  PTA_CMD_CRYPTO_CLOSE_SESSION;
+	arg.session = dd->session_id;
+	arg.num_params = ARRAY_SIZE(param);
+	param[0].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
+	param[0].u.value.a = C_CODE_AES;
+	param[1].attr = open ? TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_OUTPUT :
+			      TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
+	if (!open)
+		param[1].u.value.a = dd->crypto_session_id;
+
+	err = tee_client_invoke_func(dd->octx, &arg, param);
+	if (err < 0 || arg.ret) {
+		if (!open)
+			aes_tee.close_failed = true;
+		if (!open || err < 0)
+			WRITE_ONCE(ma35_crypto_optee_faulted, true);
+		dev_err(dd->dev,
+			"AES session %s failed: transport=%d PTA=%#x\n",
+			open ? "open" : "close", err, arg.ret);
+		return err < 0 ? err : -EIO;
+	}
+
+	if (open) {
+		dd->crypto_session_id = param[1].u.value.a;
+		aes_tee.session_open = true;
+	} else {
+		aes_tee.session_open = false;
+	}
+	return 0;
+}
 
 static int ma35_aes_dma_cascade(struct nu_aes_dev *dd, int err);
 
@@ -172,50 +237,38 @@ static int ma35_aes_get_output(struct nu_aes_dev *dd)
 
 static int ma35_aes_complete(struct nu_aes_dev *dd, int err)
 {
-	struct skcipher_request *req = skcipher_request_cast(dd->areq);
-	struct tee_ioctl_invoke_arg inv_arg;
-	struct tee_param param[4];
+	struct crypto_async_request *areq = dd->areq;
+	struct skcipher_request *req;
+	unsigned long flags;
+	u32 mode = dd->ctx->mode & AES_CTL_OPMODE_MASK;
 	u32 *ivec;
-	int i, ret = 0;
+	int i, close_err;
 
-	err = ma35_aes_get_output(dd);
+	if (!err)
+		err = ma35_aes_get_output(dd);
 
-	if ((req->iv) && ((dd->ctx->mode & AES_CTL_OPMODE_MASK) != AES_MODE_ECB)) {
+	if (!err && mode != AES_MODE_GCM && mode != AES_MODE_CCM &&
+	    mode != AES_MODE_ECB) {
+		req = skcipher_request_cast(areq);
 		ivec = (u32 *)req->iv;
-		for (i = 0; i < 4; i++)
-			ivec[i] = ma35_read_reg(dd, AES_FDBCK(i));
+		if (ivec) {
+			for (i = 0; i < 4; i++)
+				ivec[i] = ma35_read_reg(dd, AES_FDBCK(i));
+		}
 	}
 
-	/*
-	 * Close the crypto session
-	 */
-	memset(&inv_arg, 0, sizeof(inv_arg));
-	memset(&param, 0, sizeof(param));
+	close_err = ma35_aes_tee_session(dd, false);
+	if (!err)
+		err = close_err;
 
-	/* Invoke PTA_CMD_CRYPTO_CLOSE_SESSION function of PTA */
-	inv_arg.func = PTA_CMD_CRYPTO_CLOSE_SESSION;
-	inv_arg.session = dd->session_id;
-	inv_arg.num_params = 4;
-
-	/* Fill invoke cmd params */
-	param[0].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
-	param[1].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
-	param[0].u.value.a = C_CODE_AES;
-	param[1].u.value.a = dd->crypto_session_id;
-
-	err = tee_client_invoke_func(dd->octx, &inv_arg, param);
-	if ((err < 0) || (inv_arg.ret != 0)) {
-		pr_err("PTA_CMD_CRYPTO_CLOSE_SESSION err: %x\n", inv_arg.ret);
-		ret = -EINVAL;
-	}
-
+	spin_lock_irqsave(&dd->lock, flags);
+	dd->areq = NULL;
 	dd->flags &= ~AES_FLAGS_BUSY;
-	crypto_request_complete(dd->areq, err);
+	spin_unlock_irqrestore(&dd->lock, flags);
+	crypto_request_complete(areq, err);
+	queue_work(aes_tee.wq, &aes_tee.queue_work);
 
-	/* Handle new request */
-	tasklet_schedule(&dd->queue_task);
-
-	return ret;
+	return 0;
 }
 
 static int ma35_aes_dma_run(struct nu_aes_dev *dd, u32 cascade)
@@ -226,6 +279,9 @@ static int ma35_aes_dma_run(struct nu_aes_dev *dd, u32 cascade)
 	u32 dma_ctl;
 	int err;
 
+	if (READ_ONCE(ma35_crypto_optee_faulted))
+		return -EIO;
+	aes_tee.dma_mapped = false;
 	dd->dma_len += ma35_aes_sg_to_buffer(dd, dd->inbuf + dd->dma_len,
 					     AES_BUFF_SIZE - dd->dma_len);
 
@@ -249,6 +305,7 @@ static int ma35_aes_dma_run(struct nu_aes_dev *dd, u32 cascade)
 		dev_err(dev, "AES outbuf map error\n");
 		return -EINVAL;
 	}
+	aes_tee.dma_mapped = true;
 
 	/*
 	 *  Execute AES encrypt/decrypt
@@ -282,21 +339,30 @@ static int ma35_aes_dma_run(struct nu_aes_dev *dd, u32 cascade)
 	param[1].u.memref.shm_offs = 0;
 
 	err = tee_client_invoke_func(dd->octx, &inv_arg, param);
-	if ((err < 0) || (inv_arg.ret != 0)) {
-		pr_err("PTA_CMD_CRYPTO_AES_RUN err: %x\n", inv_arg.ret);
-		tasklet_schedule(&dd->done_task);
-		return -EINVAL;
-	}
-
-	tasklet_schedule(&dd->done_task);
+	aes_tee.err = err < 0 ? err : (inv_arg.ret ? -EIO : 0);
+	if (aes_tee.err)
+		dev_err(dd->dev, "AES run sid=%u: transport=%d PTA=%#x\n",
+			dd->crypto_session_id, err, inv_arg.ret);
+	queue_work(aes_tee.wq, &aes_tee.done_work);
 
 	return -EINPROGRESS;
 }
 
 static int ma35_aes_dma_cascade(struct nu_aes_dev *dd, int err)
 {
+	int i;
+
+	if (err)
+		return err;
+
+	/* The PTA reloads AES_IV for each invocation. */
+	for (i = 0; i < 4; i++)
+		ma35_write_reg(dd, ma35_read_reg(dd, AES_FDBCK(i)), AES_IV(i));
+
 	/* write AES engine DMA output data to out_sg */
-	ma35_aes_get_output(dd);
+	err = ma35_aes_get_output(dd);
+	if (err)
+		return err;
 
 	/* cascade AES DMA to process remaining data */
 	return ma35_aes_dma_run(dd, AES_CTL_DMACSCAD);
@@ -362,13 +428,26 @@ static int ma35_aes_handle_queue(struct nu_aes_dev *dd, struct crypto_async_requ
 {
 	struct crypto_async_request *areq, *backlog;
 	struct nu_aes_base_ctx *ctx;
+	struct ma35_aes_reqctx *rctx;
 	unsigned long flags;
 	int ret = 0;
 
 	spin_lock_irqsave(&dd->lock, flags);
 
-	if (new_areq)
+	if (new_areq) {
+		if (aes_tee.stopping) {
+			spin_unlock_irqrestore(&dd->lock, flags);
+			return -ESHUTDOWN;
+		}
+		if (READ_ONCE(ma35_crypto_optee_faulted)) {
+			spin_unlock_irqrestore(&dd->lock, flags);
+			return -EIO;
+		}
 		ret = crypto_enqueue_request(&dd->queue, new_areq);
+		queue_work(aes_tee.wq, &aes_tee.queue_work);
+		spin_unlock_irqrestore(&dd->lock, flags);
+		return ret;
+	}
 
 	if (dd->flags & AES_FLAGS_BUSY) {
 		spin_unlock_irqrestore(&dd->lock, flags);
@@ -389,48 +468,37 @@ static int ma35_aes_handle_queue(struct nu_aes_dev *dd, struct crypto_async_requ
 		backlog->complete(backlog, -EINPROGRESS);
 
 	ctx = crypto_tfm_ctx(areq->tfm);
+	if (crypto_tfm_alg_type(areq->tfm) == CRYPTO_ALG_TYPE_AEAD)
+		rctx = aead_request_ctx(aead_request_cast(areq));
+	else
+		rctx = skcipher_request_ctx(skcipher_request_cast(areq));
 
 	dd->areq = areq;
 	dd->ctx = ctx;
-	return ctx->start(dd, 0);
+	ctx->mode = rctx->mode;
+	ret = ma35_aes_tee_session(dd, true);
+	if (!ret)
+		ret = ctx->start(dd, 0);
+	if (ret != -EINPROGRESS)
+		ma35_aes_complete(dd, ret);
+	return ret;
 }
 
 static int ma35_aes_crypt(struct skcipher_request *req, u32 mode)
 {
 	struct nu_aes_base_ctx *ctx = crypto_skcipher_ctx(crypto_skcipher_reqtfm(req));
 	struct nu_aes_dev *aes_dd;
-	struct tee_ioctl_invoke_arg inv_arg;
-	struct tee_param param[4];
-	int  err;
+	struct ma35_aes_reqctx *rctx = skcipher_request_ctx(req);
 
 	aes_dd = ma35_aes_find_dev(ctx);
 	if (!aes_dd)
 		return -ENODEV;
 
-	/*
-	 * Open a crypto session
-	 */
-	memset(&inv_arg, 0, sizeof(inv_arg));
-	memset(&param, 0, sizeof(param));
-
-	/* Invoke PTA_CMD_CRYPTO_OPEN_SESSION function of PTA */
-	inv_arg.func = PTA_CMD_CRYPTO_OPEN_SESSION;
-	inv_arg.session = aes_dd->session_id;
-	inv_arg.num_params = 4;
-
-	/* Fill invoke cmd params */
-	param[0].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
-	param[1].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_OUTPUT;
-	param[0].u.value.a = C_CODE_AES;
-
-	err = tee_client_invoke_func(aes_dd->octx, &inv_arg, param);
-	if ((err < 0) || (inv_arg.ret != 0)) {
-		pr_err("PTA_CMD_CRYPTO_OPEN_SESSION err: %x\n", inv_arg.ret);
+	if (!req->cryptlen)
+		return 0;
+	if (!req->src || !req->dst)
 		return -EINVAL;
-	}
-	aes_dd->crypto_session_id = param[1].u.value.a;
-
-	ctx->mode = mode;
+	rctx->mode = mode;
 
 	return ma35_aes_handle_queue(aes_dd, &req->base);
 }
@@ -503,8 +571,9 @@ static int ma35_aes_optee_init(struct nu_aes_dev *dd)
 	 */
 	dd->octx = tee_client_open_context(NULL, optee_ctx_match, NULL, NULL);
 	if (IS_ERR(dd->octx)) {
-		pr_err("%s open context failed!\n", __func__);
-		return -EINVAL;
+		err = PTR_ERR(dd->octx);
+		dd->octx = NULL;
+		return err;
 	}
 
 	/*
@@ -512,18 +581,23 @@ static int ma35_aes_optee_init(struct nu_aes_dev *dd)
 	 */
 	dd->shm_pool = tee_shm_alloc_kernel_buf(dd->octx, CRYPTO_SHM_SIZE);
 	if (IS_ERR(dd->shm_pool)) {
-		pr_err("%s tee_shm_alloc failed\n", __func__);
-		return -EINVAL;
+		err = PTR_ERR(dd->shm_pool);
+		goto err_context;
 	}
 
 	dd->va_shm = tee_shm_get_va(dd->shm_pool, 0);
 	if (IS_ERR(dd->va_shm)) {
+		err = PTR_ERR(dd->va_shm);
 		tee_shm_free(dd->shm_pool);
-		pr_err("%s tee_shm_get_va failed\n", __func__);
-		return -EINVAL;
+		goto err_context;
 	}
 
 	return 0;
+
+err_context:
+	tee_client_close_context(dd->octx);
+	dd->octx = NULL;
+	return err;
 }
 
 static int ma35_aes_ecb_encrypt(struct skcipher_request *req)
@@ -619,6 +693,8 @@ static int ma35_aes_cra_init(struct crypto_tfm *tfm)
 	aes_dd = ma35_aes_find_dev(&ctx->base);
 	if (!aes_dd)
 		return -ENODEV;
+	crypto_skcipher_set_reqsize(__crypto_skcipher_cast(tfm),
+				   sizeof(struct ma35_aes_reqctx));
 
 	return 0;
 }
@@ -886,12 +962,13 @@ static int ma35_aes_gcm_crypt(struct aead_request *req, u32 mode)
 {
 	struct nu_aes_base_ctx *ctx = crypto_aead_ctx(crypto_aead_reqtfm(req));
 	struct nu_aes_dev *aes_dd;
+	struct ma35_aes_reqctx *rctx = aead_request_ctx(req);
 
 	aes_dd = ma35_aes_find_dev(ctx);
 	if (!aes_dd)
 		return -ENODEV;
 
-	ctx->mode = AES_MODE_GCM | mode;
+	rctx->mode = AES_MODE_GCM | mode;
 
 	return ma35_aes_handle_queue(aes_dd, &req->base);
 }
@@ -962,70 +1039,19 @@ static int ma35_aes_gcm_init(struct crypto_aead *aead)
 {
 	struct nu_aes_ctx *ctx = crypto_aead_ctx(aead);
 	struct nu_aes_dev *aes_dd;
-	struct tee_ioctl_invoke_arg inv_arg;
-	struct tee_param param[4];
-	int  err;
 
 	ctx->base.start = ma35_aes_gcm_dma_start;
 
 	aes_dd = ma35_aes_find_dev(&ctx->base);
 	if (!aes_dd)
 		return -ENODEV;
-
-	/*
-	 * Open a crypto session
-	 */
-	memset(&inv_arg, 0, sizeof(inv_arg));
-	memset(&param, 0, sizeof(param));
-
-	/* Invoke PTA_CMD_CRYPTO_OPEN_SESSION function of PTA */
-	inv_arg.func = PTA_CMD_CRYPTO_OPEN_SESSION;
-	inv_arg.session = aes_dd->session_id;
-	inv_arg.num_params = 4;
-
-	/* Fill invoke cmd params */
-	param[0].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
-	param[1].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_OUTPUT;
-	param[0].u.value.a = C_CODE_AES;
-
-	err = tee_client_invoke_func(aes_dd->octx, &inv_arg, param);
-	if ((err < 0) || (inv_arg.ret != 0)) {
-		pr_err("PTA_CMD_CRYPTO_OPEN_SESSION err: %x\n", inv_arg.ret);
-		return -EINVAL;
-	}
-	aes_dd->crypto_session_id = param[1].u.value.a;
+	crypto_aead_set_reqsize(aead, sizeof(struct ma35_aes_reqctx));
 
 	return 0;
 }
 
 static void ma35_aes_gcm_exit(struct crypto_aead *aead)
 {
-	struct nu_aes_ctx *ctx = crypto_aead_ctx(aead);
-	struct nu_aes_dev  *aes_dd;
-	struct tee_ioctl_invoke_arg inv_arg;
-	struct tee_param param[4];
-
-	aes_dd = ma35_aes_find_dev(&ctx->base);
-
-	/*
-	 * Close the crypto session
-	 */
-	memset(&inv_arg, 0, sizeof(inv_arg));
-	memset(&param, 0, sizeof(param));
-
-	/* Invoke PTA_CMD_CRYPTO_CLOSE_SESSION function of PTA */
-	inv_arg.func = PTA_CMD_CRYPTO_CLOSE_SESSION;
-	inv_arg.session = aes_dd->session_id;
-	inv_arg.num_params = 4;
-
-	/* Fill invoke cmd params */
-	param[0].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
-	param[1].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
-
-	param[0].u.value.a = C_CODE_AES;
-	param[1].u.value.a = aes_dd->crypto_session_id;
-
-	tee_client_invoke_func(aes_dd->octx, &inv_arg, param);
 }
 
 static struct aead_alg ma35_aes_gcm_alg[] = {
@@ -1226,12 +1252,13 @@ static int ma35_aes_ccm_crypt(struct aead_request *req, u32 mode)
 {
 	struct nu_aes_base_ctx *ctx = crypto_aead_ctx(crypto_aead_reqtfm(req));
 	struct nu_aes_dev *aes_dd;
+	struct ma35_aes_reqctx *rctx = aead_request_ctx(req);
 
 	aes_dd = ma35_aes_find_dev(ctx);
 	if (!aes_dd)
 		return -ENODEV;
 
-	ctx->mode = AES_MODE_CCM | mode;
+	rctx->mode = AES_MODE_CCM | mode;
 
 	return ma35_aes_handle_queue(aes_dd, &req->base);
 }
@@ -1259,70 +1286,19 @@ static int ma35_aes_ccm_init(struct crypto_aead *aead)
 {
 	struct nu_aes_ctx *ctx = crypto_aead_ctx(aead);
 	struct nu_aes_dev *aes_dd;
-	struct tee_ioctl_invoke_arg inv_arg;
-	struct tee_param param[4];
-	int  err;
 
 	ctx->base.start = ma35_aes_ccm_dma_start;
 
 	aes_dd = ma35_aes_find_dev(&ctx->base);
 	if (!aes_dd)
 		return -ENODEV;
-
-	/*
-	 * Open a crypto session
-	 */
-	memset(&inv_arg, 0, sizeof(inv_arg));
-	memset(&param, 0, sizeof(param));
-
-	/* Invoke PTA_CMD_CRYPTO_OPEN_SESSION function of PTA */
-	inv_arg.func = PTA_CMD_CRYPTO_OPEN_SESSION;
-	inv_arg.session = aes_dd->session_id;
-	inv_arg.num_params = 4;
-
-	/* Fill invoke cmd params */
-	param[0].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
-	param[1].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_OUTPUT;
-	param[0].u.value.a = C_CODE_AES;
-
-	err = tee_client_invoke_func(aes_dd->octx, &inv_arg, param);
-	if ((err < 0) || (inv_arg.ret != 0)) {
-		pr_err("PTA_CMD_CRYPTO_OPEN_SESSION err: %x\n", inv_arg.ret);
-		return -EINVAL;
-	}
-	aes_dd->crypto_session_id = param[1].u.value.a;
+	crypto_aead_set_reqsize(aead, sizeof(struct ma35_aes_reqctx));
 
 	return 0;
 }
 
 static void ma35_aes_ccm_exit(struct crypto_aead *aead)
 {
-	struct nu_aes_ctx *ctx = crypto_aead_ctx(aead);
-	struct nu_aes_dev  *aes_dd;
-	struct tee_ioctl_invoke_arg inv_arg;
-	struct tee_param param[4];
-
-	aes_dd = ma35_aes_find_dev(&ctx->base);
-
-	/*
-	 * Close the crypto session
-	 */
-	memset(&inv_arg, 0, sizeof(inv_arg));
-	memset(&param, 0, sizeof(param));
-
-	/* Invoke PTA_CMD_CRYPTO_CLOSE_SESSION function of PTA */
-	inv_arg.func = PTA_CMD_CRYPTO_CLOSE_SESSION;
-	inv_arg.session = aes_dd->session_id;
-	inv_arg.num_params = 4;
-
-	/* Fill invoke cmd params */
-	param[0].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
-	param[1].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_INPUT;
-
-	param[0].u.value.a = C_CODE_AES;
-	param[1].u.value.a = aes_dd->crypto_session_id;
-
-	tee_client_invoke_func(aes_dd->octx, &inv_arg, param);
 }
 
 static struct aead_alg ma35_aes_ccm_alg[] = {
@@ -1348,34 +1324,53 @@ static struct aead_alg ma35_aes_ccm_alg[] = {
 },
 };
 
-static void ma35_aes_queue_task(unsigned long data)
-{
-	struct nu_aes_dev *dd = (struct nu_aes_dev *)data;
-
-	ma35_aes_handle_queue(dd, NULL);
-}
-
 static void ma35_aes_done_task(unsigned long data)
 {
 	struct nu_aes_dev *dd = (struct nu_aes_dev *)data;
+	int err = aes_tee.err;
 
-	dma_unmap_single(dd->dev, dd->dma_inbuf, AES_BUFF_SIZE, DMA_TO_DEVICE);
-	dma_unmap_single(dd->dev, dd->dma_outbuf, AES_BUFF_SIZE, DMA_FROM_DEVICE);
+	if (aes_tee.dma_mapped) {
+		dma_unmap_single(dd->dev, dd->dma_inbuf, AES_BUFF_SIZE,
+				 DMA_TO_DEVICE);
+		dma_unmap_single(dd->dev, dd->dma_outbuf, AES_BUFF_SIZE,
+				 DMA_FROM_DEVICE);
+		aes_tee.dma_mapped = false;
+	}
 
-	(void)dd->resume(dd, 0);
+	if (err) {
+		ma35_aes_complete(dd, err);
+		return;
+	}
+	err = dd->resume(dd, 0);
+	if (err && err != -EINPROGRESS)
+		ma35_aes_complete(dd, err);
+}
+
+static void ma35_aes_tee_queue_work(struct work_struct *work)
+{
+	struct ma35_aes_optee_state *tee =
+		container_of(work, struct ma35_aes_optee_state, queue_work);
+
+	ma35_aes_handle_queue(tee->dd, NULL);
+}
+
+static void ma35_aes_tee_done_work(struct work_struct *work)
+{
+	struct ma35_aes_optee_state *tee =
+		container_of(work, struct ma35_aes_optee_state, done_work);
+
+	ma35_aes_done_task((unsigned long)tee->dd);
 }
 
 static int ma35_register_gcm_ccm(struct device *dev)
 {
-	int i, err;
+	int err;
 
 	/*
 	 *  Register AES GCM algorithms
 	 */
 	err = crypto_register_aeads(ma35_aes_gcm_alg, ARRAY_SIZE(ma35_aes_gcm_alg));
 	if (err) {
-		for (i = 0; i < ARRAY_SIZE(ma35_aes_algs); i++)
-			crypto_unregister_skcipher(&ma35_aes_algs[i]);
 		dev_err(dev, "Could not register ma35_aes_gcm_algs!\n");
 		return err;
 	}
@@ -1385,8 +1380,6 @@ static int ma35_register_gcm_ccm(struct device *dev)
 	 */
 	err = crypto_register_aeads(ma35_aes_ccm_alg, ARRAY_SIZE(ma35_aes_ccm_alg));
 	if (err) {
-		for (i = 0; i < ARRAY_SIZE(ma35_aes_algs); i++)
-			crypto_unregister_skcipher(&ma35_aes_algs[i]);
 		crypto_unregister_aeads(ma35_aes_gcm_alg, ARRAY_SIZE(ma35_aes_gcm_alg));
 		dev_err(dev, "Could not register ma35_aes_ccm_algs!\n");
 		return err;
@@ -1394,16 +1387,35 @@ static int ma35_register_gcm_ccm(struct device *dev)
 	return 0;
 }
 
+static void ma35_aes_tee_stop(struct nu_aes_dev *dd)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&dd->lock, flags);
+	aes_tee.stopping = true;
+	spin_unlock_irqrestore(&dd->lock, flags);
+	if (aes_tee.wq) {
+		destroy_workqueue(aes_tee.wq);
+		aes_tee.wq = NULL;
+	}
+	if (aes_tee.session_open)
+		dev_err(dd->dev, "Unreleased AES session %u; reboot required\n",
+			dd->crypto_session_id);
+}
+
 int ma35_aes_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 {
 	struct nu_aes_dev *aes_dd = &crypto_dev->aes_dd;
-	struct tee_ioctl_open_session_arg sess_arg;
+	struct tee_ioctl_open_session_arg sess_arg = { };
 	int i, err;
+	bool gcm_ccm_registered = false;
 
 	aes_dd->dev = dev;
 	aes_dd->nu_cdev = crypto_dev;
 	aes_dd->reg_base = crypto_dev->reg_base;
 	aes_dd->octx = NULL;
+	memset(&aes_tee, 0, sizeof(aes_tee));
+	aes_tee.dd = aes_dd;
 
 	err = ma35_aes_optee_init(aes_dd);
 	if (err)
@@ -1412,7 +1424,6 @@ int ma35_aes_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	/*
 	 * Open AES session with Crypto Trusted App
 	 */
-	memset(&sess_arg, 0, sizeof(sess_arg));
 	memcpy(sess_arg.uuid, aes_dd->nu_cdev->tee_cdev->id.uuid.b, TEE_IOCTL_UUID_LEN);
 	sess_arg.clnt_login = TEE_IOCTL_LOGIN_PUBLIC;
 	sess_arg.num_params = 0;
@@ -1420,7 +1431,8 @@ int ma35_aes_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	err = tee_client_open_session(aes_dd->octx, &sess_arg, NULL);
 	if ((err < 0) || (sess_arg.ret != 0)) {
 		pr_err("%s open session failed, err: %x\n", __func__, sess_arg.ret);
-		return -EINVAL;
+		err = err < 0 ? err : -EIO;
+		goto err_context;
 	}
 
 	aes_dd->session_id = sess_arg.session;
@@ -1428,10 +1440,15 @@ int ma35_aes_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	INIT_LIST_HEAD(&aes_dd->list);
 	spin_lock_init(&aes_dd->lock);
 
-	tasklet_init(&aes_dd->done_task, ma35_aes_done_task, (unsigned long)aes_dd);
-	tasklet_init(&aes_dd->queue_task, ma35_aes_queue_task, (unsigned long)aes_dd);
-
 	crypto_init_queue(&aes_dd->queue, 32);
+	INIT_WORK(&aes_tee.queue_work, ma35_aes_tee_queue_work);
+	INIT_WORK(&aes_tee.done_work, ma35_aes_tee_done_work);
+	aes_tee.wq = alloc_ordered_workqueue("ma35-aes-optee",
+						 WQ_MEM_RECLAIM);
+	if (!aes_tee.wq) {
+		err = -ENOMEM;
+		goto err_session;
+	}
 
 	spin_lock(&nu_aes.lock);
 	list_add_tail(&aes_dd->list, &nu_aes.dev_list);
@@ -1452,16 +1469,31 @@ int ma35_aes_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	err = ma35_register_gcm_ccm(dev);
 	if (err)
 		goto err_algs;
+	gcm_ccm_registered = true;
 
+	aes_tee.registered = true;
 	pr_info("ma35 crypto aes optee initialized.\n");
 	return 0;
 
 err_algs:
+	if (gcm_ccm_registered) {
+		crypto_unregister_aeads(ma35_aes_gcm_alg,
+					 ARRAY_SIZE(ma35_aes_gcm_alg));
+		crypto_unregister_aeads(ma35_aes_ccm_alg,
+					 ARRAY_SIZE(ma35_aes_ccm_alg));
+	}
+	while (i--)
+		crypto_unregister_skcipher(&ma35_aes_algs[i]);
 	spin_lock(&nu_aes.lock);
 	list_del(&aes_dd->list);
 	spin_unlock(&nu_aes.lock);
-	tasklet_kill(&aes_dd->done_task);
-	tasklet_kill(&aes_dd->queue_task);
+	ma35_aes_tee_stop(aes_dd);
+err_session:
+	tee_client_close_session(aes_dd->octx, aes_dd->session_id);
+err_context:
+	tee_shm_free(aes_dd->shm_pool);
+	tee_client_close_context(aes_dd->octx);
+	aes_dd->octx = NULL;
 	return err;
 }
 
@@ -1470,8 +1502,10 @@ int ma35_aes_optee_remove(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	struct nu_aes_dev *aes_dd = &crypto_dev->aes_dd;
 	int i;
 
-	if (aes_dd == NULL)
-		return -ENODEV;
+	if (!aes_tee.registered)
+		return 0;
+
+	ma35_aes_tee_stop(aes_dd);
 
 	for (i = 0; i < ARRAY_SIZE(ma35_aes_algs); i++)
 		crypto_unregister_skcipher(&ma35_aes_algs[i]);
@@ -1483,13 +1517,11 @@ int ma35_aes_optee_remove(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	list_del(&aes_dd->list);
 	spin_unlock(&nu_aes.lock);
 
-	tasklet_kill(&aes_dd->done_task);
-	tasklet_kill(&aes_dd->queue_task);
-
 	tee_client_close_session(aes_dd->octx, aes_dd->session_id);
 	tee_shm_free(aes_dd->shm_pool);
 	tee_client_close_context(aes_dd->octx);
 	aes_dd->octx = NULL;
+	aes_tee.registered = false;
 
 	return 0;
 }
