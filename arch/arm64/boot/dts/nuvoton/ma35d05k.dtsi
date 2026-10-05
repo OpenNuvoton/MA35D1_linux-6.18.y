@@ -1663,11 +1663,11 @@
 	};
 
 	gc520l: gc520l@40280000 {
-		compatible = "nuvoton,galcore";
+		compatible = "vivante,gc";
 		reg = <0x0 0x40280000 0x0 0x10000>;
 		interrupts = <GIC_SPI 27 IRQ_TYPE_LEVEL_HIGH>;
 		clocks = <&clk GFX_GATE>;
-		nuvoton,sys = <&sys>;
+		clock-names = "core";
 		resets = <&reset MA35D1_RESET_GFX>;
 		status = "disabled";
 	};

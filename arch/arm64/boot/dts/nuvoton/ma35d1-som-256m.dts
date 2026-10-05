@@ -32,10 +32,6 @@
 			reg = <0x0 0x8A800000 0x0 0x2000000>; /* 32MiB */
 			no-map;
 		};
-		gc520l_buf: gc520l_buf@0 {
-			reg = <0x0 0x8A000000 0x0 0x800000>; /* 8MiB */
-			no-map;
-		};
 	};
 
 	gpio_keys_test {
@@ -338,7 +334,6 @@
 };
 
 &gc520l {
-	memory-region = <&gc520l_buf>;
 	status = "okay";
 };
 
