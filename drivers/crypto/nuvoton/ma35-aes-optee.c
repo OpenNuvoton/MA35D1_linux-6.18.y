@@ -197,7 +197,8 @@ static int ma35_aes_get_output(struct nu_aes_dev *dd)
 	int retval;
 
 	if ((ctx->mode & AES_CTL_OPMODE_MASK) == AES_MODE_GCM) {
-		ma35_aes_buffer_to_sg(dd, dd->inbuf, ctx->assoclen);
+		/* inbuf[0..15] is the counter block, AAD follows it */
+		ma35_aes_buffer_to_sg(dd, dd->inbuf + 16, ctx->assoclen);
 
 		retval = ma35_aes_buffer_to_sg(dd, dd->outbuf, ctx->text_len);
 		if ((retval % 16) != 0) {
@@ -205,8 +206,12 @@ static int ma35_aes_get_output(struct nu_aes_dev *dd)
 			retval += (16 - (retval % 16));
 		}
 
-		/* attach auth tag to end of ciphertext */
-		ma35_aes_buffer_to_sg(dd, dd->outbuf + retval, ctx->authsize);
+		if (ctx->mode & AES_CTL_ENCRPT) {
+			/* attach auth tag to end of ciphertext */
+			ma35_aes_buffer_to_sg(dd, dd->outbuf + retval, ctx->authsize);
+		} else if (crypto_memneq(ctx->tag, dd->outbuf + retval, ctx->authsize)) {
+			return -EBADMSG;
+		}
 
 	} else if ((ctx->mode & AES_CTL_OPMODE_MASK) == AES_MODE_CCM) {
 		ma35_aes_buffer_to_sg(dd, dd->inbuf, ctx->assoclen);
@@ -222,7 +227,7 @@ static int ma35_aes_get_output(struct nu_aes_dev *dd)
 			ma35_aes_buffer_to_sg(dd, dd->outbuf + retval, ctx->authsize);
 		} else {
 			/* check the decrypt output auth tag */
-			if (memcmp(ctx->tag, dd->outbuf + retval, ctx->authsize) != 0) {
+			if (crypto_memneq(ctx->tag, dd->outbuf + retval, ctx->authsize)) {
 				pr_debug("CCM tag is wrong!\n");
 				return -EBADMSG;
 			}
@@ -873,14 +878,17 @@ static int ma35_aes_gcm_dma_start(struct nu_aes_dev *dd, int err)
 {
 	struct aead_request *req = aead_request_cast(dd->areq);
 	struct nu_aes_base_ctx *ctx = dd->ctx;
-	u32 key;
 	int i, len;
 
 	pr_debug("[%s] - assoclen: %d, cryptlen: %d\n", __func__,
 		 req->assoclen, req->cryptlen);
 
 	ctx->assoclen = req->assoclen;
-	ctx->text_len = req->cryptlen;
+	if (ctx->mode & AES_CTL_ENCRPT)
+		ctx->text_len = req->cryptlen;
+	else
+		/* decrypt input carries the auth tag at its tail */
+		ctx->text_len = req->cryptlen - ctx->authsize;
 
 	dd->req_len = req->assoclen + req->cryptlen;
 	dd->in_sg = req->src;
@@ -913,17 +921,21 @@ static int ma35_aes_gcm_dma_start(struct nu_aes_dev *dd, int err)
 	/*
 	 *  Copy text data
 	 */
-	if (req->cryptlen) {
+	if (ctx->text_len) {
 		dd->dma_len += ma35_aes_sg_to_buffer(dd, dd->inbuf + dd->dma_len,
-						     req->cryptlen);
+						     ctx->text_len);
 
 		/* padding to be AES block aligned */
-		if ((req->cryptlen % 16) != 0) {
-			len = 16 - (req->cryptlen % 16);
+		if ((ctx->text_len % 16) != 0) {
+			len = 16 - (ctx->text_len % 16);
 			memcpy(&dd->inbuf[dd->dma_len], g_zeros, len);
 			dd->dma_len += len;
 		}
 	}
+
+	/* decrypt: save the received tag, it is compared in ma35_aes_get_output() */
+	if (!(ctx->mode & AES_CTL_ENCRPT))
+		ma35_aes_sg_to_buffer(dd, ctx->tag, min_t(int, ctx->authsize, 16));
 
 	if (ctx->keylen == AES_KS_KEYLEN) {
 		/* configure AES Key from Key Store */
@@ -933,12 +945,8 @@ static int ma35_aes_gcm_dma_start(struct nu_aes_dev *dd, int err)
 	} else {
 		/* program AES key */
 		ma35_write_reg(dd, 0, AES_KSCTL);
-		for (i = 0; i < ctx->keylen/4; i++) {
-			key = ctx->aes_key[i];
-			key = ((key>>24)&0xff) | ((key>>8)&0xff00) |
-			       ((key&0xff00)<<8) | (key<<24);
-			ma35_write_reg(dd, key, AES_KEY(i));
-		}
+		for (i = 0; i < ctx->keylen / 4; i++)
+			ma35_write_reg(dd, ctx->aes_key[i], AES_KEY(i));
 	}
 
 	/* clear AES IV registers */
@@ -951,10 +959,10 @@ static int ma35_aes_gcm_dma_start(struct nu_aes_dev *dd, int err)
 
 	ma35_write_reg(dd, 12, AES_GCM_IVCNT(0));
 	ma35_write_reg(dd, req->assoclen, AES_GCM_ACNT(0));
-	ma35_write_reg(dd, req->cryptlen, AES_GCM_PCNT(0));
+	ma35_write_reg(dd, ctx->text_len, AES_GCM_PCNT(0));
 
 	ma35_write_reg(dd, (ctx->keysz_sel | ctx->mode | AES_CTL_INSWAP | AES_CTL_OUTSWAP |
-		       AES_CTL_KOUTSWAP | AES_CTL_DMAEN), AES_CTL);
+		       AES_CTL_KINSWAP | AES_CTL_KOUTSWAP | AES_CTL_DMAEN), AES_CTL);
 
 	pr_debug("[%s] - mode: 0x%08x, AES_CTL = 0x%x\n", __func__,
 		 ctx->mode, ma35_read_reg(dd, AES_CTL));
