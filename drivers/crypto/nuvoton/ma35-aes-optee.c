@@ -375,6 +375,10 @@ static int ma35_aes_dma_start(struct nu_aes_dev *dd, int err)
 	u32 *iv = (u32 *)req->iv;
 	int i;
 
+	/* ECB has ivsize 0: req->iv may be ZERO_SIZE_PTR, never dereference it */
+	if ((ctx->mode & AES_CTL_OPMODE_MASK) == AES_MODE_ECB)
+		iv = NULL;
+
 	if ((req->cryptlen == 0) || (req->src == NULL) || (req->dst == NULL))
 		return ma35_aes_complete(dd, 0);  /* no data */
 
@@ -687,7 +691,8 @@ static int ma35_aes_cra_init(struct crypto_tfm *tfm)
 	struct nu_aes_ctx *ctx = crypto_tfm_ctx(tfm);
 	struct nu_aes_dev *aes_dd;
 
-	// printk("AES: %s\n", tfm->__crt_alg->cra_driver_name);
+	//pr_info("ma35-aes-optee: open cra_name=\"%s\" cra_driver_name=\"%s\"\n",
+	//	tfm->__crt_alg->cra_name, tfm->__crt_alg->cra_driver_name);
 	ctx->base.start = ma35_aes_dma_start;
 
 	aes_dd = ma35_aes_find_dev(&ctx->base);
