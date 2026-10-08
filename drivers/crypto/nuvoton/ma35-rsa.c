@@ -501,6 +501,8 @@ static long ma35_rsa_ioctl(struct file *filp, unsigned int cmd, unsigned long ar
 		while (ma35_read_reg(dd, RSA_STS) & RSA_STS_BUSY) {
 			if (time_after(jiffies, timeout)) {
 				pr_err("RSA decrypt time-out!\n");
+				dma_unmap_single(dd->dev, rsa_ctx->dma_buff, RSA_BUFF_SIZE,
+						 DMA_BIDIRECTIONAL);
 				return -EIO;
 			}
 		}

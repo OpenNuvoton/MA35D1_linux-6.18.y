@@ -115,6 +115,10 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 					DMA_BIDIRECTIONAL);
 	if (unlikely(dma_mapping_error(dd->dev, ctx->dma_fdbck))) {
 		dev_err(dd->dev, "dma map bytes error\n");
+		dma_unmap_single(dd->dev, ctx->dma_buff,
+				 is_key_block ? HMAC_KEY_BUFF_SIZE : SHA_BUFF_SIZE,
+				 DMA_TO_DEVICE);
+		ctx->dma_buff = 0;
 		return -EINVAL;
 	}
 
