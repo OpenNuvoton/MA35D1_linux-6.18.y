@@ -186,7 +186,7 @@ static int ma35_rsa_enc(struct akcipher_request *req)
 	if (err)
 		return err;
 
-	ctx->dma_buff = dma_map_single(dd->dev, ctx->buffer, RSA_BUFF_SIZE, DMA_FROM_DEVICE);
+	ctx->dma_buff = dma_map_single(dd->dev, ctx->buffer, RSA_BUFF_SIZE, DMA_BIDIRECTIONAL);
 	if (unlikely(dma_mapping_error(dd->dev, ctx->dma_buff))) {
 		dev_err(dd->dev, "RSA buffer dma map error\n");
 		return -EINVAL;
@@ -233,11 +233,11 @@ static int ma35_rsa_enc(struct akcipher_request *req)
 	err = tee_client_invoke_func(dd->octx, &inv_arg, param);
 	if ((err < 0) || (inv_arg.ret != 0)) {
 		pr_err("PTA_CMD_CRYPTO_RSA_RUN enc err: %x\n", inv_arg.ret);
-		dma_unmap_single(dd->dev, ctx->dma_buff, RSA_BUFF_SIZE, DMA_FROM_DEVICE);
+		dma_unmap_single(dd->dev, ctx->dma_buff, RSA_BUFF_SIZE, DMA_BIDIRECTIONAL);
 		return -EINVAL;
 	}
 
-	dma_unmap_single(dd->dev, ctx->dma_buff, RSA_BUFF_SIZE, DMA_FROM_DEVICE);
+	dma_unmap_single(dd->dev, ctx->dma_buff, RSA_BUFF_SIZE, DMA_BIDIRECTIONAL);
 
 	memset(m, 0, sizeof(m));
 	ma35_rsa_reg_to_hex((u32 *)&ctx->buffer[ANS_OFF], ctx->rsa_bit_len, m, &len);
