@@ -19,6 +19,14 @@
 #include <crypto/scatterwalk.h>
 #include <linux/types.h>
 
+/*
+ * Priority of the skcipher, aead and ahash algorithms. It is kept below the
+ * ARMv8 Crypto Extension implementations (200..400), so that kernel users such
+ * as dm-crypt, IPsec and fscrypt use the CPU by default. TSI is still selected
+ * by its driver name, e.g. "ma35-optee-cbc-aes".
+ */
+#define MA35_CRA_PRIORITY	150
+
 #define	INTEN			0x000
 #define	INTEN_AESIEN			(0x1 <<	0)
 #define	INTEN_AESEIEN			(0x1 <<	1)
