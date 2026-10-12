@@ -1675,6 +1675,7 @@
 	panel: panel {
 		/* refer to panel-simple.yaml for supported compatible strings for panels */
 		compatible = "avic,tm070ddh03", "panel-dpi";
+		status = "disabled";
 
 		port {
 			panel_in: endpoint@0 {
