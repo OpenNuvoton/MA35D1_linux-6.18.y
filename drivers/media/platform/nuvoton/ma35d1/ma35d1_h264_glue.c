@@ -174,13 +174,6 @@ int ma35d1_h264_dec_run(struct hantro_ctx *ctx)
 	dst_buf = hantro_get_dst_buf(ctx);
 
 	hctx->decInput.data_length = vb2_get_plane_payload(&src_buf->vb2_buf, 0);
-	if (hctx->decInput.data_length >= 0x200000) {
-		dev_dbg(vpu->dev, "Input len = %d, should be EOS.\n", hctx->decInput.data_length);
-		dev_dbg(vpu->dev, "src last flag is %d\n", (src_buf->flags & V4L2_BUF_FLAG_LAST) ? 1 : 0);
-		src_buf->flags |= V4L2_BUF_FLAG_LAST;
-		dst_buf->flags |= V4L2_BUF_FLAG_LAST;
-		return 0;
-	}
 
 	hctx->decInput.stream_bus_address = vb2_dma_contig_plane_dma_addr(&src_buf->vb2_buf, 0);
 	if (vpu->vc8k_cfg.use_dev_coherent) {

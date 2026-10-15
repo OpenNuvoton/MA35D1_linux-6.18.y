@@ -18,6 +18,7 @@
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/sizes.h>
 #include <linux/videodev2.h>
 #include <linux/workqueue.h>
 #include <media/v4l2-ctrls.h>
@@ -254,6 +255,21 @@ static int vidioc_try_fmt(struct file *file, void *priv, struct v4l2_format *f,
 				128 * DIV_ROUND_UP(pix_mp->width, 16) *
 				      DIV_ROUND_UP(pix_mp->height, 16);
 
+	} else if (!capture && fmt->fourcc == V4L2_PIX_FMT_JPEG) {
+		u32 max_sizeimage;
+
+		/*
+		 * Bound JPEG input buffers by the negotiated frame dimensions.
+		 * Clients may otherwise size every buffer for the advertised
+		 * 16000x16000 limit, even when decoding a much smaller image.
+		 * Keep the 2 MiB input budget used by older GStreamer versions
+		 * as a floor, and allow larger buffers for larger images.
+		 */
+		max_sizeimage = max_t(u32, SZ_2M, fmt->header_size +
+			pix_mp->width * pix_mp->height * fmt->max_depth);
+		if (!pix_mp->plane_fmt[0].sizeimage ||
+		    pix_mp->plane_fmt[0].sizeimage > max_sizeimage)
+			pix_mp->plane_fmt[0].sizeimage = max_sizeimage;
 	} else if (!pix_mp->plane_fmt[0].sizeimage) {
 		/*
 		 * For coded formats the application can specify

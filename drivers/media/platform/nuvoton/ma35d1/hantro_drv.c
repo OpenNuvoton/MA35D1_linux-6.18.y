@@ -106,7 +106,14 @@ static void hantro_job_finish(struct hantro_dev *vpu,
 	src->sequence = ctx->sequence_out++;
 	dst->sequence = ctx->sequence_cap++;
 
-	ctx->buf_finish(ctx, &dst->vb2_buf, bytesused);
+	if (eos) {
+		unsigned int i;
+
+		for (i = 0; i < dst->vb2_buf.num_planes; i++)
+			vb2_set_plane_payload(&dst->vb2_buf, i, 0);
+	} else {
+		ctx->buf_finish(ctx, &dst->vb2_buf, bytesused);
+	}
 
 	if(result == VB2_BUF_STATE_ERROR)
 		dst->flags |= V4L2_BUF_FLAG_ERROR;
@@ -189,6 +196,14 @@ static void device_run(void *priv)
 
 	v4l2_m2m_buf_copy_metadata(src, dst, true);
 
+	/* Legacy decoder drain: an empty OUTPUT buffer is an EOS marker. */
+	if (ctx->buf_finish == hantro_dec_buf_finish &&
+	    !vb2_get_plane_payload(&src->vb2_buf, 0)) {
+		dst->flags |= V4L2_BUF_FLAG_LAST;
+		hantro_job_finish(ctx->dev, ctx, 0, VB2_BUF_STATE_DONE);
+		return;
+	}
+
 	ctx->codec_ops->run(ctx);
 	return;
 }
@@ -233,6 +248,9 @@ queue_init(void *priv, struct vb2_queue *src_vq, struct vb2_queue *dst_vq)
 	src_vq->lock = &ctx->dev->vpu_mutex;
 	src_vq->dev = ctx->dev->v4l2_dev.dev;
 	src_vq->supports_requests = true;
+	/* Preserve empty decoder OUTPUT buffers used by legacy clients to drain. */
+	src_vq->allow_zero_bytesused =
+		ctx->buf_finish == hantro_dec_buf_finish;
 
 	ret = vb2_queue_init(src_vq);
 	if (ret)

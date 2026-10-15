@@ -51,7 +51,6 @@ static struct vc_jpeg_linear_mem	outputAddressY;
 static struct vc_jpeg_linear_mem	outputAddressCbCr;
 static u8   *OutImagePtr_Y, *OutImagePtr_U, *OutImagePtr_V;
 static int  WriteOutImageBytesCnt;
-static bool is_first;
 
 /*
  *  For monitoring frame rate
@@ -103,7 +102,6 @@ int ma35d1_jpeg_dec_init(struct	hantro_ctx *ctx)
 	sliceToUser = 0;
 	nbrOfImagesToOut = 0;
 	scanCounter = 0;
-	is_first = 1;
 
 	memset(&jpegInst, 0, sizeof(jpegInst));
 	memset(&jpegIn,	0, sizeof(jpegIn));
@@ -156,15 +154,6 @@ int ma35d1_jpeg_dec_run(struct hantro_ctx *ctx)
 
 	src_dma	= vb2_dma_contig_plane_dma_addr(&src_buf->vb2_buf, 0);
 	data_len = len = vb2_get_plane_payload(&src_buf->vb2_buf, 0);
-
-	if (!is_first && len >= 0x200000) {
-		// dev_info(vpu->dev, "Input len = %d, should be EOS.\n", len);
-		// dev_info(vpu->dev, "src last flag is %d\n", (src_buf->flags & V4L2_BUF_FLAG_LAST) ? 1 : 0);
-		src_buf->flags |= V4L2_BUF_FLAG_LAST;
-		dst_buf->flags |= V4L2_BUF_FLAG_LAST;
-		return 0;
-	}
-	is_first = 0;
 
 	if (vpu->vc8k_cfg.use_dev_coherent) {
 		byteStrmStart =	vpu->vc8k_cfg.res_mem_virt + (src_dma -
