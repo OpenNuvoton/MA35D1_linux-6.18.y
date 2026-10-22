@@ -54,6 +54,7 @@ struct ma35_aes_optee_state {
 	bool session_open;
 	bool close_failed;
 	int err;
+	int aead_chunk;		/* GCM/CCM payload bytes in the current DMA */
 };
 
 static struct ma35_aes_optee_state aes_tee;
@@ -191,53 +192,64 @@ static int ma35_aes_buffer_to_sg(struct nu_aes_dev *dd, u8 *bptr, int max_cnt)
 	return out_cnt;
 }
 
-static int ma35_aes_get_output(struct nu_aes_dev *dd)
+static bool ma35_aes_is_aead(struct nu_aes_base_ctx *ctx)
+{
+	u32 mode = ctx->mode & AES_CTL_OPMODE_MASK;
+
+	return mode == AES_MODE_GCM || mode == AES_MODE_CCM;
+}
+
+/*
+ *  GCM/CCM output holds only the payload of each DMA (the J0/B0 and AAD
+ *  blocks of the first DMA produce no output). The last DMA appends the
+ *  auth tag at the next block boundary.
+ */
+static int ma35_aes_get_output(struct nu_aes_dev *dd, bool last)
 {
 	struct nu_aes_base_ctx *ctx = dd->ctx;
-	int retval;
+	int len;
 
-	if ((ctx->mode & AES_CTL_OPMODE_MASK) == AES_MODE_GCM) {
-		/* inbuf[0..15] is the counter block, AAD follows it */
-		ma35_aes_buffer_to_sg(dd, dd->inbuf + 16, ctx->assoclen);
-
-		retval = ma35_aes_buffer_to_sg(dd, dd->outbuf, ctx->text_len);
-		if ((retval % 16) != 0) {
-			/* seek to block aligned position */
-			retval += (16 - (retval % 16));
-		}
-
-		if (ctx->mode & AES_CTL_ENCRPT) {
-			/* attach auth tag to end of ciphertext */
-			ma35_aes_buffer_to_sg(dd, dd->outbuf + retval, ctx->authsize);
-		} else if (crypto_memneq(ctx->tag, dd->outbuf + retval, ctx->authsize)) {
-			return -EBADMSG;
-		}
-
-	} else if ((ctx->mode & AES_CTL_OPMODE_MASK) == AES_MODE_CCM) {
-		ma35_aes_buffer_to_sg(dd, dd->inbuf, ctx->assoclen);
-
-		retval = ma35_aes_buffer_to_sg(dd, dd->outbuf, ctx->text_len);
-		if ((retval % 16) != 0) {
-			/* seek to block aligned position */
-			retval += (16 - (retval % 16));
-		}
-
-		if (ctx->mode & AES_CTL_ENCRPT) {
-			/* attach auth tag to end of ciphertext */
-			ma35_aes_buffer_to_sg(dd, dd->outbuf + retval, ctx->authsize);
-		} else {
-			/* check the decrypt output auth tag */
-			if (crypto_memneq(ctx->tag, dd->outbuf + retval, ctx->authsize)) {
-				pr_debug("CCM tag is wrong!\n");
-				return -EBADMSG;
-			}
-			pr_debug("CMM check passed. %d, %d\n", retval, ctx->authsize);
-		}
-	} else {
-		retval = ma35_aes_buffer_to_sg(dd, dd->outbuf, dd->dma_len);
+	if (!ma35_aes_is_aead(ctx)) {
+		ma35_aes_buffer_to_sg(dd, dd->outbuf, dd->dma_len);
 		dd->dma_len = 0;
+		return 0;
 	}
+
+	len = aes_tee.aead_chunk;
+	ma35_aes_buffer_to_sg(dd, dd->outbuf, len);
+	dd->dma_len = 0;
+	if (!last)
+		return 0;
+
+	len = round_up(len, AES_BLOCK_SIZE);
+	if (ctx->mode & AES_CTL_ENCRPT)
+		ma35_aes_buffer_to_sg(dd, dd->outbuf + len, ctx->authsize);
+	else if (crypto_memneq(ctx->tag, dd->outbuf + len, ctx->authsize))
+		return -EBADMSG;
 	return 0;
+}
+
+/*
+ *  Fill the GCM/CCM payload of the next DMA. Every DMA except the last holds
+ *  whole blocks. A cascaded last DMA leaves one block of outbuf free for the
+ *  auth tag that the engine appends to its output. The TSI times out on a
+ *  cascaded CCM DMA of more than one block, so CCM continues block by block.
+ */
+static void ma35_aes_aead_fill(struct nu_aes_dev *dd, u32 cascade)
+{
+	int room = AES_BUFF_SIZE - dd->dma_len - (cascade ? AES_BLOCK_SIZE : 0);
+	int len, cnt = min(dd->req_len, room);
+
+	if (cascade && (dd->ctx->mode & AES_CTL_OPMODE_MASK) == AES_MODE_CCM)
+		cnt = min(cnt, AES_BLOCK_SIZE);
+	len = ma35_aes_sg_to_buffer(dd, dd->inbuf + dd->dma_len, cnt);
+	aes_tee.aead_chunk = len;
+	dd->dma_len += len;
+	if (len % AES_BLOCK_SIZE) {
+		memset(&dd->inbuf[dd->dma_len], 0,
+		       AES_BLOCK_SIZE - (len % AES_BLOCK_SIZE));
+		dd->dma_len = round_up(dd->dma_len, AES_BLOCK_SIZE);
+	}
 }
 
 static int ma35_aes_complete(struct nu_aes_dev *dd, int err)
@@ -250,7 +262,7 @@ static int ma35_aes_complete(struct nu_aes_dev *dd, int err)
 	int i, close_err;
 
 	if (!err)
-		err = ma35_aes_get_output(dd);
+		err = ma35_aes_get_output(dd, true);
 
 	if (!err && mode != AES_MODE_GCM && mode != AES_MODE_CCM &&
 	    mode != AES_MODE_ECB) {
@@ -287,8 +299,11 @@ static int ma35_aes_dma_run(struct nu_aes_dev *dd, u32 cascade)
 	if (READ_ONCE(ma35_crypto_optee_faulted))
 		return -EIO;
 	aes_tee.dma_mapped = false;
-	dd->dma_len += ma35_aes_sg_to_buffer(dd, dd->inbuf + dd->dma_len,
-					     AES_BUFF_SIZE - dd->dma_len);
+	if (ma35_aes_is_aead(dd->ctx))
+		ma35_aes_aead_fill(dd, cascade);
+	else
+		dd->dma_len += ma35_aes_sg_to_buffer(dd, dd->inbuf + dd->dma_len,
+						     AES_BUFF_SIZE - dd->dma_len);
 
 	if (!dd->in_sg || (dd->req_len == 0)) {
 		dd->resume = ma35_aes_complete;	/* no more data */
@@ -360,12 +375,16 @@ static int ma35_aes_dma_cascade(struct nu_aes_dev *dd, int err)
 	if (err)
 		return err;
 
-	/* The PTA reloads AES_IV for each invocation. */
-	for (i = 0; i < 4; i++)
-		ma35_write_reg(dd, ma35_read_reg(dd, AES_FDBCK(i)), AES_IV(i));
+	/*
+	 * The PTA reloads AES_IV for each skcipher invocation. A cascaded
+	 * GCM/CCM DMA continues from the TSI session state instead.
+	 */
+	if (!ma35_aes_is_aead(dd->ctx))
+		for (i = 0; i < 4; i++)
+			ma35_write_reg(dd, ma35_read_reg(dd, AES_FDBCK(i)), AES_IV(i));
 
 	/* write AES engine DMA output data to out_sg */
-	err = ma35_aes_get_output(dd);
+	err = ma35_aes_get_output(dd, false);
 	if (err)
 		return err;
 
@@ -890,7 +909,8 @@ static int ma35_aes_gcm_dma_start(struct nu_aes_dev *dd, int err)
 		/* decrypt input carries the auth tag at its tail */
 		ctx->text_len = req->cryptlen - ctx->authsize;
 
-	dd->req_len = req->assoclen + req->cryptlen;
+	/* the payload is cut into cascaded DMAs, the tag is read separately */
+	dd->req_len = req->assoclen + ctx->text_len;
 	dd->in_sg = req->src;
 	dd->out_sg = req->dst;
 	dd->in_sg_off = 0;
@@ -918,24 +938,14 @@ static int ma35_aes_gcm_dma_start(struct nu_aes_dev *dd, int err)
 		}
 	}
 
-	/*
-	 *  Copy text data
-	 */
-	if (ctx->text_len) {
-		dd->dma_len += ma35_aes_sg_to_buffer(dd, dd->inbuf + dd->dma_len,
-						     ctx->text_len);
-
-		/* padding to be AES block aligned */
-		if ((ctx->text_len % 16) != 0) {
-			len = 16 - (ctx->text_len % 16);
-			memcpy(&dd->inbuf[dd->dma_len], g_zeros, len);
-			dd->dma_len += len;
-		}
-	}
+	/* AAD passes to dst unchanged; inbuf[0..15] is the counter block */
+	ma35_aes_buffer_to_sg(dd, dd->inbuf + 16, req->assoclen);
 
 	/* decrypt: save the received tag, it is compared in ma35_aes_get_output() */
 	if (!(ctx->mode & AES_CTL_ENCRPT))
-		ma35_aes_sg_to_buffer(dd, ctx->tag, min_t(int, ctx->authsize, 16));
+		scatterwalk_map_and_copy(ctx->tag, req->src,
+					 req->assoclen + ctx->text_len,
+					 ctx->authsize, 0);
 
 	if (ctx->keylen == AES_KS_KEYLEN) {
 		/* configure AES Key from Key Store */
@@ -971,11 +981,39 @@ static int ma35_aes_gcm_dma_start(struct nu_aes_dev *dd, int err)
 }
 
 
+/*
+ *  The payload is processed in cascaded DMAs, but J0/B0 and the whole AAD
+ *  must go in the first DMA together with the first payload block.
+ */
+static int ma35_aes_aead_check(struct aead_request *req, u32 mode, int info_len)
+{
+	struct nu_aes_base_ctx *ctx = crypto_aead_ctx(crypto_aead_reqtfm(req));
+	unsigned int text_len = req->cryptlen;
+
+	if (!(mode & AES_CTL_ENCRPT)) {
+		if (req->cryptlen < ctx->authsize)
+			return -EINVAL;
+		text_len -= ctx->authsize;
+	}
+	if (info_len + (text_len ? AES_BLOCK_SIZE : 0) > AES_BUFF_SIZE)
+		return -EINVAL;
+	return 0;
+}
+
 static int ma35_aes_gcm_crypt(struct aead_request *req, u32 mode)
 {
 	struct nu_aes_base_ctx *ctx = crypto_aead_ctx(crypto_aead_reqtfm(req));
 	struct nu_aes_dev *aes_dd;
 	struct ma35_aes_reqctx *rctx = aead_request_ctx(req);
+	int err;
+
+	/* J0 + AAD */
+	if (req->assoclen > AES_BUFF_SIZE)
+		return -EINVAL;
+	err = ma35_aes_aead_check(req, mode,
+				  16 + round_up(req->assoclen, AES_BLOCK_SIZE));
+	if (err)
+		return err;
 
 	aes_dd = ma35_aes_find_dev(ctx);
 	if (!aes_dd)
@@ -1100,7 +1138,6 @@ static int ma35_aes_ccm_dma_start(struct nu_aes_dev *dd, int err)
 	struct aead_request *req = aead_request_cast(dd->areq);
 	struct nu_aes_base_ctx *ctx = dd->ctx;
 	int i, q, nlen, plen, alen, len_left, use_len;
-	int p_blk_cnt;
 	u8 ctr[16];
 	u8 *b;
 
@@ -1115,8 +1152,8 @@ static int ma35_aes_ccm_dma_start(struct nu_aes_dev *dd, int err)
 		/* decrypt input contains auth tag */
 		ctx->text_len = req->cryptlen - ctx->authsize;
 
-	/* decrypt input contains auth tag */
-	dd->req_len = req->assoclen + req->cryptlen;
+	/* the payload is cut into cascaded DMAs, the tag is read separately */
+	dd->req_len = req->assoclen + ctx->text_len;
 	dd->in_sg = req->src;
 	dd->out_sg = req->dst;
 	dd->in_sg_off = 0;
@@ -1184,39 +1221,20 @@ static int ma35_aes_ccm_dma_start(struct nu_aes_dev *dd, int err)
 		}
 	}
 
-	/*-----------------------------------------------------------------*/
-	/*    Formatting of the payload                                    */
-	/*-----------------------------------------------------------------*/
-	p_blk_cnt = 0;
-	if (plen > 0) {
-		len_left = plen;
-		while (len_left > 0) {
-			/*
-			 * fill payload by 16 bytes block
-			 */
-			use_len = len_left > 16 ? 16 : len_left;
+	/* the payload is added by ma35_aes_dma_run() */
+	dd->dma_len = b - dd->inbuf;
 
-			/* naturally padding zero if len_left < 16 */
-			memset(b, 0, 16);
-			ma35_aes_sg_to_buffer(dd, b, use_len);
-			b += 16;
-			len_left -= use_len;
-			p_blk_cnt++;
-		}
-	}
+	/* AAD passes to dst unchanged; it follows B0 and its 2-byte length */
+	ma35_aes_buffer_to_sg(dd, dd->inbuf + 16 + 2, alen);
 
 	/*
 	 *  In decrypt case, get the tag from tail of input cipher text.
 	 *  We should compare this tag with the CCM decrypt output tag.
 	 */
-	if (!(ctx->mode & AES_CTL_ENCRPT)) {
-		q = ma35_aes_sg_to_buffer(dd, ctx->tag,
-					  ((ctx->authsize > 16) ? 16 : ctx->authsize));
-		pr_debug("[%s] - CCM read tag return length: %d/%d\n", __func__,
-			 q, ctx->authsize);
-	}
-
-	dd->dma_len = b - dd->inbuf;
+	if (!(ctx->mode & AES_CTL_ENCRPT))
+		scatterwalk_map_and_copy(ctx->tag, req->src,
+					 req->assoclen + ctx->text_len,
+					 ctx->authsize, 0);
 
 	/*-----------------------------------------------------------------*/
 	/*  Block Ctr0                                                     */
@@ -1248,7 +1266,7 @@ static int ma35_aes_ccm_dma_start(struct nu_aes_dev *dd, int err)
 	ma35_write_reg(dd, (INTSTS_AESIF | INTSTS_AESEIF), INTSTS);
 
 	ma35_write_reg(dd, 0, AES_GCM_IVCNT(0));
-	ma35_write_reg(dd, (dd->dma_len - (p_blk_cnt * 16)), AES_GCM_ACNT(0));
+	ma35_write_reg(dd, dd->dma_len, AES_GCM_ACNT(0));
 	ma35_write_reg(dd, ctx->text_len, AES_GCM_PCNT(0));
 
 	ma35_write_reg(dd, (ctx->keysz_sel | ctx->mode | AES_CTL_INSWAP | AES_CTL_OUTSWAP |
@@ -1266,6 +1284,15 @@ static int ma35_aes_ccm_crypt(struct aead_request *req, u32 mode)
 	struct nu_aes_base_ctx *ctx = crypto_aead_ctx(crypto_aead_reqtfm(req));
 	struct nu_aes_dev *aes_dd;
 	struct ma35_aes_reqctx *rctx = aead_request_ctx(req);
+	int err;
+
+	/* B0 + 2-byte AAD length + AAD */
+	if (req->assoclen > AES_BUFF_SIZE)
+		return -EINVAL;
+	err = ma35_aes_aead_check(req, mode, 16 + (req->assoclen ?
+				  round_up(req->assoclen + 2, AES_BLOCK_SIZE) : 0));
+	if (err)
+		return err;
 
 	aes_dd = ma35_aes_find_dev(ctx);
 	if (!aes_dd)
