@@ -65,7 +65,7 @@ static struct drm_driver ma35_drm_driver = {
 	.major				= DRIVER_MAJOR,
 	.minor				= DRIVER_MINOR,
 
-	DRM_GEM_DMA_DRIVER_OPS_VMAP_WITH_DUMB_CREATE(ma35_drm_gem_dma_dumb_create),
+	DRM_GEM_DMA_DRIVER_OPS_WITH_DUMB_CREATE(ma35_drm_gem_dma_dumb_create),
 	DRM_FBDEV_DMA_DRIVER_OPS,
 };
 
@@ -123,9 +123,9 @@ static int ma35_mode_init(struct ma35_drm *priv)
 	}
 
 	mode_config->min_width = 32;
-	mode_config->max_width = 1920;
+	mode_config->max_width = 2048;
 	mode_config->min_height = 1;
-	mode_config->max_height = 1080;
+	mode_config->max_height = 2048;
 	mode_config->preferred_depth = 24;
 	mode_config->cursor_width = MA35_CURSOR_WIDTH;
 	mode_config->cursor_height = MA35_CURSOR_HEIGHT;
