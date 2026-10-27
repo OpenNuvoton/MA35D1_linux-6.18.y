@@ -854,6 +854,7 @@ static irqreturn_t ma35d1serial_interrupt(int irq, void *dev_id)
 {
 	struct uart_ma35d1_port *up = (struct uart_ma35d1_port *)dev_id;
 	unsigned int isr, fsr;
+	unsigned long flags;
 #ifdef EN_UART_PDMA_RX
 	unsigned char ch[64];
 	uint32_t i = 0;
@@ -898,8 +899,11 @@ static irqreturn_t ma35d1serial_interrupt(int irq, void *dev_id)
 
 		check_modem_status(up);
 
-		if (isr & THRE_INT)
-			transmit_chars(up);
+		if (isr & THRE_INT){
+   			uart_port_lock_irqsave(&up->port, &flags);
+        		transmit_chars(up);
+        		uart_port_unlock_irqrestore(&up->port, flags);
+    		}
 
 		if (fsr & (BIF | FEF | PEF | RX_OVER_IF | TX_OVER_IF))
 			serial_out(up, UART_REG_FSR, (BIF | FEF | PEF | RX_OVER_IF | TX_OVER_IF));
