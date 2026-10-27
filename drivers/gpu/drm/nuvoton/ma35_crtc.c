@@ -68,9 +68,11 @@ ma35_crtc_mode_valid(struct drm_crtc *drm_crtc,
 	if (mode->vdisplay > mode_config->max_height || mode->vdisplay < mode_config->min_height)
 		return MODE_BAD_VVALUE;
 
-	if (mode->clock > MA35_MAX_PIXEL_CLK) {
+	if (mode->clock > MA35_MAX_PIXEL_CLK)
 		return MODE_CLOCK_HIGH;
-	}
+
+	if (mode->clock < MA35_MIN_PIXEL_CLK)
+		return MODE_CLOCK_LOW;
 
 	return MODE_OK;
 }
@@ -78,21 +80,11 @@ ma35_crtc_mode_valid(struct drm_crtc *drm_crtc,
 static int ma35_crtc_atomic_check(struct drm_crtc *drm_crtc,
 					 struct drm_atomic_state *state)
 {
-	struct ma35_drm *priv = ma35_drm(drm_crtc->dev);
 	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, drm_crtc);
 	struct drm_display_mode *mode = &crtc_state->mode;
-	struct drm_display_mode *adjusted_mode = &crtc_state->adjusted_mode;
-	int clk_rate;
 
-	if (mode->clock > MA35_MAX_PIXEL_CLK)
-		return MODE_CLOCK_HIGH;
-
-	// check rounded pixel clock
-	clk_rate = clk_round_rate(priv->dcupclk, mode->clock * 1000);
-	if (clk_rate <= 0)
-		return MODE_CLOCK_RANGE;
-
-	adjusted_mode->clock = DIV_ROUND_UP(clk_rate, 1000);
+	if (mode->clock > MA35_MAX_PIXEL_CLK || mode->clock < MA35_MIN_PIXEL_CLK)
+		return -EINVAL;
 
 	return 0;
 }

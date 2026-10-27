@@ -9,6 +9,7 @@
 
 #include <linux/types.h>
 #include <linux/clk.h>
+#include <linux/delay.h>
 
 #include <drm/drm_bridge.h>
 #include <drm/drm_bridge_connector.h>
@@ -33,10 +34,37 @@ static void ma35_encoder_mode_set(struct drm_encoder *encoder,
 	struct drm_device *drm_dev = encoder->dev;
 	struct ma35_drm *priv = ma35_drm(drm_dev);
 	struct drm_display_mode *adjusted_mode = &crtc_state->adjusted_mode;
-	int result;
+	int result, ret;
+	struct clk *vpll = clk_get_parent(priv->dcupclk);
+	unsigned long target = adjusted_mode->clock * 1000UL;
+	unsigned long pll = 0;
+	unsigned int div;
 
-	// pixel clock it checked in crtc
-	clk_set_rate(priv->dcupclk, adjusted_mode->clock * 1000);
+	for (div = MA35_DCUP_DIV_MIN; vpll && div <= MA35_DCUP_DIV_MAX; div += 2) {
+		if (target * div >= MA35_VPLL_MIN_HZ) {
+			pll = target * div;
+			break;
+		}
+	}
+
+	if (pll && clk_get_rate(vpll) != pll) {
+		/* the PLL driver leaves the PLL off after set_rate: gate around it */
+		clk_disable_unprepare(priv->dcupclk);
+		ret = clk_set_rate(vpll, pll);
+		if (ret)
+			drm_err(drm_dev, "Cannot set VPLL to %lu Hz (%d), check the PLL setup in the DT\n",
+				pll, ret);
+		clk_prepare_enable(priv->dcupclk);
+		usleep_range(200, 400);
+	}
+
+	/* the PLL lands a few Hz off: ceil keeps the divider from stepping up */
+	if (pll)
+		target = DIV_ROUND_UP(clk_get_rate(vpll), div);
+	ret = clk_set_rate(priv->dcupclk, target);
+	if (ret)
+		drm_err(drm_dev, "Cannot set pixel clock to %lu Hz: %d\n", target, ret);
+
 	result = DIV_ROUND_UP(clk_get_rate(priv->dcupclk), 1000);
 	drm_dbg(drm_dev, "Pixel clock: %d kHz; request : %d kHz\n", result, adjusted_mode->clock);
 }

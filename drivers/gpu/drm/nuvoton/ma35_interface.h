@@ -14,6 +14,18 @@
 #include <drm/drm_connector.h>
 #include <drm/drm_encoder.h>
 
+/*
+ * VPLL (advanced PLL, integer/fractional mode):
+ *   85.7 MHz <= FCLKO <= 2400 MHz
+ * DCU pixel clock divider:
+ *   dcup_div = VPLL / (2 * (DCUPDIV + 1))
+ */
+#define MA35_VPLL_MIN_HZ	85700000UL
+#define MA35_DCUP_DIV_MIN	2
+#define MA35_DCUP_DIV_MAX	16
+#define MA35_MIN_PIXEL_CLK \
+	DIV_ROUND_UP(MA35_VPLL_MIN_HZ, MA35_DCUP_DIV_MAX * 1000UL)
+
 struct ma35_drm;
 
 struct ma35_interface {
