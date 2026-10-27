@@ -124,13 +124,10 @@ int ma35_interface_init(struct ma35_drm *priv)
 				"No panel/bridge remote-endpoint found for this output\n");
 		else if (ret != -EPROBE_DEFER)
 			drm_err(drm_dev, "Failed to attach bridge chain\n");
-		goto error_encoder;
+		goto error_early;
 	}
 
 	return 0;
-
-error_encoder:
-	drm_encoder_cleanup(drm_encoder);
 
 error_early:
 	return ret;
