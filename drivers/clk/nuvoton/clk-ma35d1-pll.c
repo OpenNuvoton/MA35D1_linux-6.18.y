@@ -271,7 +271,9 @@ static unsigned long CLK_SetPLLFreq(struct ma35d1_clk_pll *pll, unsigned long Pl
 		break;
 	}
 
-	val_ctl1 = VSIPLLCTL1_PD_MSK | u32Reg[1];
+	/* keep the current power state: a PLL that is already running (prepare
+	 * count held by others, e.g. VPLL) must not be left powered down */
+	val_ctl1 = (val_ctl1 & VSIPLLCTL1_PD_MSK) | u32Reg[1];
 	val_ctl2 = u32Reg[2];
 
 	__raw_writel(val_ctl0, pll->ctl0_base);

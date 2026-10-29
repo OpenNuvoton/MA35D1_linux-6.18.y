@@ -48,13 +48,10 @@ static void ma35_encoder_mode_set(struct drm_encoder *encoder,
 	}
 
 	if (pll && clk_get_rate(vpll) != pll) {
-		/* the PLL driver leaves the PLL off after set_rate: gate around it */
-		clk_disable_unprepare(priv->dcupclk);
 		ret = clk_set_rate(vpll, pll);
 		if (ret)
 			drm_err(drm_dev, "Cannot set VPLL to %lu Hz (%d), check the PLL setup in the DT\n",
 				pll, ret);
-		clk_prepare_enable(priv->dcupclk);
 		usleep_range(200, 400);
 	}
 
