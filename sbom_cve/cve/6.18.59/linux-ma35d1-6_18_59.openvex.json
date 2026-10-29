@@ -1,0 +1,166 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://nuvoton.com/vex/linux-ma35d1/6.18.59",
+  "author": "Nuvoton",
+  "role": "Product Security Team",
+  "timestamp": "2026-10-29T04:08:25Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2025-71074"
+      },
+      "products": [
+        {
+          "@id": "pkg:generic/linux-ma35d1@6.18.59"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "component_not_present",
+      "status_notes": "This CVE affects the USB gadget FunctionFS (f_fs) driver (drivers/usb/gadget/function/f_fs.c). The MA35D1 defconfig enables the USB gadget core (CONFIG_USB_GADGET) but does not enable the FunctionFS gadget function driver (no CONFIG_USB_F_FS / CONFIG_USB_CONFIGFS_F_FS). The vulnerable code path is not compiled into the delivered product."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-100072"
+      },
+      "products": [
+        {
+          "@id": "pkg:generic/linux-ma35d1@6.18.59"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "component_not_present",
+      "status_notes": "CVE.org Linux CNA identifies the ACPI platform-device code as affected and lists Linux 7.2.6 as a fixed stable release for branches newer than the fixed 6.6/6.12 lines. The vulnerability affects drivers/acpi/acpi_platform.c. CONFIG_ACPI is not enabled in the MA35D1 ARM64 defconfig and is not default-enabled on ARM64, so the affected ACPI platform code is not compiled into the delivered product."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-100073"
+      },
+      "products": [
+        {
+          "@id": "pkg:generic/linux-ma35d1@6.18.59"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "The vulnerability affects the target product. Remediation should be performed by applying an equivalent backport or upgrading to a kernel release containing the official fix.",
+      "status_notes": "CVE.org Linux CNA identifies Linux 6.16.3 and later as affected and lists Linux 7.2.6 as the first fixed stable release, with no fixed 6.18 release listed. The vulnerability affects transaction-credit calculation during ext4 delayed-allocation writeback. CONFIG_EXT4_FS=y is enabled, and Linux 6.18.59 still calculates the writeback reservation with ext4_chunk_trans_blocks() rather than the corrected upper-bound ext4_meta_trans_blocks() calculation. The vulnerable filesystem and code path are present, so the product is affected until an equivalent backport is applied."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-43042"
+      },
+      "products": [
+        {
+          "@id": "pkg:generic/linux-ma35d1@6.18.59"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "component_not_present",
+      "status_notes": "This CVE affects the MPLS subsystem (net/mpls/). The MA35D1 defconfig does not enable CONFIG_MPLS_ROUTING; the vulnerable code is not compiled into the delivered product."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-43095"
+      },
+      "products": [
+        {
+          "@id": "pkg:generic/linux-ma35d1@6.18.59"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "component_not_present",
+      "status_notes": "This CVE affects the ASoC SoundWire Device Class Audio (SDCA) framework (sound/soc/sdca/), used by SoundWire-attached audio codecs on platforms such as Qualcomm/Intel laptops. The MA35D1 defconfig does not enable CONFIG_SND_SOC_SDCA and uses its own on-chip SoC audio path instead; the vulnerable code is not present in the delivered product."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-43326"
+      },
+      "products": [
+        {
+          "@id": "pkg:generic/linux-ma35d1@6.18.59"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "component_not_present",
+      "status_notes": "This CVE affects the sched_ext (BPF-extensible scheduler class) subsystem (kernel/sched/ext.c), which requires CONFIG_SCHED_CLASS_EXT. This option is not enabled in the MA35D1 defconfig; the vulnerable code is not compiled into the delivered product."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-46153"
+      },
+      "products": [
+        {
+          "@id": "pkg:generic/linux-ma35d1@6.18.59"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "component_not_present",
+      "status_notes": "This CVE affects the 802.1Q VLAN subsystem (net/8021q/). The MA35D1 defconfig does not enable CONFIG_VLAN_8021Q; the vulnerable code is not compiled into the delivered product."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-53024"
+      },
+      "products": [
+        {
+          "@id": "pkg:generic/linux-ma35d1@6.18.59"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "component_not_present",
+      "status_notes": "This CVE affects the Greybus 'raw' protocol driver (drivers/staging/greybus/raw.c), part of the Greybus/UniPro subsystem used on Project Ara/Motorola Moto Mods hardware. The MA35D1 defconfig does not enable CONFIG_GREYBUS; the vulnerable code is not compiled into the delivered product."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-53091"
+      },
+      "products": [
+        {
+          "@id": "pkg:generic/linux-ma35d1@6.18.59"
+        }
+      ],
+      "status": "affected",
+      "action_statement": "The vulnerability affects the target product. Remediation should be performed by applying an equivalent backport or upgrading to a kernel release containing the official fix.",
+      "status_notes": "This CVE affects qdisc_pkt_len_segs_init() in the core networking queueing-discipline (qdisc) GSO packet-length dissection path (net/sched/sch_generic.c), which is part of the core Linux networking stack compiled in whenever CONFIG_NET/CONFIG_INET is enabled (as it is on MA35D1). This core code path is present and reachable in the delivered product, and the official fix is not yet included in the target kernel version. The product should be considered affected until the official fix is backported."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-64160"
+      },
+      "products": [
+        {
+          "@id": "pkg:generic/linux-ma35d1@6.18.59"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "component_not_present",
+      "status_notes": "CVE.org Linux CNA identifies Linux 5.18 and later as affected, with the first listed fixed stable release at Linux 7.0.11. The vulnerability affects remote_i_size and zero_point synchronization in fs/netfs/. CONFIG_NETFS_SUPPORT is not selected by the MA35D1 defconfig because NFS_FSCACHE, AFS, Ceph, 9P, SMB/CIFS, and EROFS on-demand are disabled. Therefore the vulnerable code is not compiled into the delivered product."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-98118"
+      },
+      "products": [
+        {
+          "@id": "pkg:generic/linux-ma35d1@6.18.59"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "component_not_present",
+      "status_notes": "CVE.org Linux CNA identifies Linux 6.12 and later as affected and lists Linux 7.2.7 as a fixed stable release. The vulnerability affects readahead synchronization in fs/netfs/. The MA35D1 defconfig does not enable any selector of CONFIG_NETFS_SUPPORT: NFS_FSCACHE, AFS, Ceph, 9P_FS, NET_9P, SMB/CIFS, and EROFS on-demand are disabled. CONFIG_NFS_FS alone does not select netfs, so the vulnerable code is not compiled into the delivered product."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-98153"
+      },
+      "products": [
+        {
+          "@id": "pkg:generic/linux-ma35d1@6.18.59"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "component_not_present",
+      "status_notes": "CVE.org Linux CNA identifies Linux 6.16 and later as affected and lists Linux 7.2.7 as a fixed stable release. The vulnerability affects concurrent initialization of NVMe Flexible Data Placement information in the NVMe host core. The MA35D1 defconfig does not enable NVME_CORE, BLK_DEV_NVME, or any NVMe-over-Fabrics transport, and the platform has no PCI/PCIe controller. The vulnerable NVMe host component is not compiled into the delivered product."
+    }
+  ]
+}
