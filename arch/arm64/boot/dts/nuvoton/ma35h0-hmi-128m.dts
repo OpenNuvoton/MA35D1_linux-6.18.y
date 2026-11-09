@@ -32,10 +32,6 @@
 			reg = <0x0 0x84FF0000 0x0 0x1010000>; /* 17MiB */
 			no-map;
 		};
-		vc8k_buf: vc8k_buf@0 {
-                       reg = <0x0 0x86000000 0x0 0x1800000>; /* 24MiB */
-			no-map;
-		};
 	};
 
 	gpio_keys_test {
@@ -256,8 +252,6 @@
 };
 
 &vc8k {
-	memory-region = <&vc8k_buf>;
-	debug_level = <1>;
 	status = "okay";
 };
 
