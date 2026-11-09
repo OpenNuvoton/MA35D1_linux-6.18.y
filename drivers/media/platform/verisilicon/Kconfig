@@ -4,7 +4,7 @@ comment "Verisilicon media platform drivers"
 
 config VIDEO_HANTRO
 	tristate "Hantro VPU driver"
-	depends on ARCH_MXC || ARCH_ROCKCHIP || ARCH_AT91 || ARCH_SUNXI || ARCH_STM32 || COMPILE_TEST
+	depends on ARCH_MXC || ARCH_ROCKCHIP || ARCH_AT91 || ARCH_SUNXI || ARCH_STM32 || ARCH_MA35D1 || ARCH_MA35D0 || ARCH_MA35H0 || COMPILE_TEST
 	depends on V4L_MEM2MEM_DRIVERS
 	depends on VIDEO_DEV
 	select MEDIA_CONTROLLER
@@ -36,6 +36,16 @@ config VIDEO_HANTRO_IMX8M
 	default y
 	help
 	  Enable support for i.MX8M SoCs.
+
+config VIDEO_HANTRO_MA35
+	bool "Hantro VPU Nuvoton MA35 support"
+	depends on VIDEO_HANTRO
+	depends on ARCH_MA35D1 || ARCH_MA35D0 || ARCH_MA35H0 || COMPILE_TEST
+	depends on !VIDEO_NUVOTON_VC8K
+	default ARCH_MA35D1 || ARCH_MA35D0 || ARCH_MA35H0
+	help
+	  Enable support for the VC8000NanoD decoder on Nuvoton MA35 family
+	  SoCs (H.264 stateless decode).
 
 config VIDEO_HANTRO_SAMA5D4
 	bool "Hantro VDEC SAMA5D4 support"

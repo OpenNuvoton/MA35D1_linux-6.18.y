@@ -729,6 +729,11 @@ static const struct of_device_id of_hantro_match[] = {
 	{ .compatible = "nxp,imx8mq-vpu-g1", .data = &imx8mq_vpu_g1_variant },
 	{ .compatible = "nxp,imx8mq-vpu-g2", .data = &imx8mq_vpu_g2_variant },
 #endif
+#ifdef CONFIG_VIDEO_HANTRO_MA35
+	{ .compatible = "nuvoton,ma35d1-vpu", .data = &ma35d1_vpu_variant, },
+	{ .compatible = "nuvoton,ma35d0-vpu", .data = &ma35d1_vpu_variant, },
+	{ .compatible = "nuvoton,ma35h0-vpu", .data = &ma35d1_vpu_variant, },
+#endif
 #ifdef CONFIG_VIDEO_HANTRO_SAMA5D4
 	{ .compatible = "microchip,sama5d4-vdec", .data = &sama5d4_vdec_variant, },
 #endif
