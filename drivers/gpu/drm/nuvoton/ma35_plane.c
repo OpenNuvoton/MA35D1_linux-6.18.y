@@ -421,7 +421,9 @@ static void ma35_plane_atomic_update(struct drm_plane *drm_plane,
 		ma35_overlay_position_update(priv, new_state->crtc_x, new_state->crtc_y,
 			new_state->crtc_w, new_state->crtc_h);
 		// alpha blending
-		if (fb->format->format == DRM_FORMAT_ARGB8888) {
+		if (fb->format->format == DRM_FORMAT_ARGB8888 ||
+			fb->format->format == DRM_FORMAT_ARGB4444 ||
+			fb->format->format == DRM_FORMAT_ARGB1555) {
 			ma35_layer_blend_mode_select(layer->config.blend_mode, &reg);
 			reg |= FIELD_PREP(MA35_SRC_ALPHA_MODE, (u32)layer->config.alpha_mode[0]) |
 				   FIELD_PREP(MA35_DST_ALPHA_MODE, (u32)layer->config.alpha_mode[1]);
