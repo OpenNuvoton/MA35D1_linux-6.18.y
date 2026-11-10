@@ -209,7 +209,7 @@ static void optee_rng_cleanup(struct hwrng *rng)
 }
 
 static int ma35d1_optee_trng_write_ks(struct optee_rng_private *pvt_data,
-				    int owner, int *key_num)
+				      int owner, int *key_num)
 {
 	struct tee_ioctl_invoke_arg inv_arg;
 	struct tee_param param[4];
@@ -226,7 +226,7 @@ static int ma35d1_optee_trng_write_ks(struct optee_rng_private *pvt_data,
 	param[0].u.value.a = owner;
 
 	ret = tee_client_invoke_func(pvt_data->ctx, &inv_arg, param);
-	if ((ret < 0) || (inv_arg.ret != 0)) {
+	if (ret < 0 || inv_arg.ret != 0) {
 		dev_err(pvt_data->dev, "PTA_CMD_TRNG_WRITE_KS invoke err: %x\n",
 			inv_arg.ret);
 		return -EINVAL;
@@ -299,7 +299,7 @@ static int ma35d1_optee_trng_init(struct device *dev)
 	param[0].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_OUTPUT;
 
 	ret = tee_client_invoke_func(pvt_data.ctx, &inv_arg, param);
-	if ((ret < 0) || (inv_arg.ret != 0)) {
+	if (ret < 0 || inv_arg.ret != 0) {
 		dev_err(dev, "PTA_CMD_TRNG_INIT invoke err: %x\n", inv_arg.ret);
 		return -EINVAL;
 	}
@@ -337,7 +337,7 @@ static int optee_rng_probe(struct device *dev)
 	sess_arg.num_params = 0;
 
 	ret = tee_client_open_session(pvt_data.ctx, &sess_arg, NULL);
-	if ((ret < 0) || (sess_arg.ret != 0)) {
+	if (ret < 0 || sess_arg.ret != 0) {
 		dev_err(dev, "TRNG tee_client_open_session failed, err: %x\n", sess_arg.ret);
 		err = -EINVAL;
 		goto out_ctx;

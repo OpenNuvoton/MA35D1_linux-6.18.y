@@ -188,7 +188,6 @@ static int ma35d1_trng_gen_nonce(struct ma35d1_trng *tdev, uint32_t *nonce)
 		loop = 2;
 
 	for (i = 0; i < loop; i++) {
-
 		err = ma35d1_trng_wait_busy_clear(tdev);
 		if (err != 0)
 			return err;
@@ -320,7 +319,7 @@ static int ma35d1_trng_read(struct hwrng *rng, void *buf, size_t max, bool wait)
 }
 
 static long ma35d1_trng_ioctl(struct hwrng *rng, unsigned int cmd,
-			    unsigned long arg)
+			      unsigned long arg)
 {
 	switch (cmd) {
 	case MA35D1_TRNG_IOC_WRITE_KS:
