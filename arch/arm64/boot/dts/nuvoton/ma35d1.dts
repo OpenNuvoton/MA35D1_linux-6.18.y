@@ -79,3 +79,35 @@
 		};
 	};
 };
+
+/* Old VC8K node, used with CONFIG_VIDEO_NUVOTON_VC8K */
+#if 0
+/ {
+	/* VC8000 engine */
+	vc8k:vc8k@40290000 {
+		compatible = "nuvoton,ma35d1-vc8k";
+		reg = <0x0 0x40290000 0x0 0x1000>;
+		clocks = <&clk VC8K_GATE>;
+		nuvoton,sys = <&sys>;
+		interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
+		pp_out_enable = "yes";
+		pp_wait_vsync = <0>;  /* timeout(ms) of waiting VSYNC when PP enabled */
+		fb_width = <1024>;
+		fb_height = <600>;
+		fb_fmt = "RGB888";   /* RGB888, RGB565, or YUV420P */
+		use_dev_coherent = <1>;
+		status = "disabled";
+	};
+};
+
+/* reserved-memory */
+	vc8k_buf: vc8k_buf@0 {
+			reg = <0x0 0x8A800000 0x0 0x2000000>; /* 32MiB */
+			no-map;
+		};
+
+&vc8k {
+	memory-region = <&vc8k_buf>;
+	status = "okay";
+};
+#endif
