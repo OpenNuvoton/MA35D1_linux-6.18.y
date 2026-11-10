@@ -125,7 +125,7 @@ static long ma35d0_misctrl_ioctl(struct file *file, unsigned int cmd, unsigned l
 	return res.a0;
 }
 
-const struct file_operations misctrl_fops = {
+static const struct file_operations misctrl_fops = {
 	.owner  = THIS_MODULE,
 	.open   = ma35d0_misctrl_open,
 	.unlocked_ioctl = ma35d0_misctrl_ioctl,
@@ -144,7 +144,7 @@ static int ma35d0_misctrl_probe(struct platform_device *pdev)
 	int ret;
 
 	misctrl = devm_kzalloc(&pdev->dev, sizeof(struct ma35d0_misctrl), GFP_KERNEL);
-	if (misctrl == NULL)
+	if (!misctrl)
 		return -ENOMEM;
 
 	ret = misc_register(&misctrl_dev[0]);
@@ -165,7 +165,6 @@ static void ma35d0_misctrl_remove(struct platform_device *pdev)
 	misc_deregister(&misctrl_dev[0]);
 }
 
-
 static const struct of_device_id ma35d0_misctrl_of_match[] = {
 	{ .compatible = "nuvoton,ma35d0-misctrl" },
 	{},
@@ -174,7 +173,6 @@ MODULE_DEVICE_TABLE(of, ma35d0_misctrl_of_match);
 
 static struct platform_driver ma35d0_misctrl_driver = {
 	.driver = {
-		.owner  = THIS_MODULE,
 		.name = "ma35d0-misctrl",
 		.of_match_table = of_match_ptr(ma35d0_misctrl_of_match),
 	},
@@ -187,6 +185,4 @@ module_platform_driver(ma35d0_misctrl_driver);
 MODULE_ALIAS("platform:ma35d0-misctrl");
 MODULE_DESCRIPTION("misctrl driver for Nuvoton MA35D0");
 MODULE_LICENSE("GPL v2");
-
-
 
