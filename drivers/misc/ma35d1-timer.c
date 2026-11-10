@@ -68,6 +68,7 @@
 #define TIMER_EVENT_COUNTER (TIMER_EVENT_COUNTING_MODE | TIMER_CNT_EN)
 
 struct ma35d1_timer {
+	/* protects timer registers and the event/update state */
 	spinlock_t lock;
 	struct device *dev;
 	struct clk *clk;
@@ -96,7 +97,7 @@ static irqreturn_t ma35d1_timer_interrupt(int irq, void *dev_id)
 {
 	struct ma35d1_timer *t = (struct ma35d1_timer *)dev_id;
 	static int cnt;
-	static uint32_t t0, t1;
+	static u32 t0, t1;
 	unsigned long flag = 0;
 
 	spin_lock(&t->lock);
@@ -154,12 +155,12 @@ static irqreturn_t ma35d1_timer_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static void timer_SwitchClkSrc(u8 u8clksel, struct ma35d1_timer *t)
+static void timer_switch_clk_src(u8 u8clksel, struct ma35d1_timer *t)
 {
 	struct clk *clkmux;
 	u8 ch;
 	u32 val, tmpval;
-	ulong tmrFreq;
+	ulong tmr_freq;
 	int ret;
 
 	ch = t->ch;
@@ -168,22 +169,22 @@ static void timer_SwitchClkSrc(u8 u8clksel, struct ma35d1_timer *t)
 	if (u8clksel == 1 || u8clksel == 5) {
 		// timer clock is lxt 32.768k, set prescaler to 1 - 1.
 		t->psc = 0;
-		tmrFreq = 32768;
+		tmr_freq = 32768;
 	} else if (u8clksel == 5) {
 		// timer clock is lirc 32kHz, set prescaler to 1 - 1.
 		t->psc = 0;
-		tmrFreq = 32000;
+		tmr_freq = 32000;
 	} else if (u8clksel == 0) {
 		// timer clock is hxt 24MHz, set prescaler to 2 - 1.
 		t->psc = (2 - 1);
-		tmrFreq = 24000000;
+		tmr_freq = 24000000;
 	} else if (u8clksel == 7) {
 		// timer clock is hirc 12MHz.
 		t->psc = 0;
-		tmrFreq = 12000000;
+		tmr_freq = 12000000;
 	} else {
 		t->psc = (10 - 1);
-		tmrFreq = 180000000;
+		tmr_freq = 180000000;
 	}
 
 	if (t->ch <= 7) {
@@ -211,7 +212,7 @@ static void timer_SwitchClkSrc(u8 u8clksel, struct ma35d1_timer *t)
 		return;
 	}
 
-	clk_set_rate(t->eclk, tmrFreq);
+	clk_set_rate(t->eclk, tmr_freq);
 
 	clkmux = clk_get_parent(t->eclk);
 	if (IS_ERR(clkmux)) {
@@ -422,16 +423,16 @@ static long timer_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	// check clock source
 	pr_debug("\ttimer_ioctl_clksec: [ %d ]\n", t->clksel);
-	timer_SwitchClkSrc(t->clksel, t);
+	timer_switch_clk_src(t->clksel, t);
 
 	switch (cmd) {
 	case TMR_IOC_CLKLXT:
 	case TMR_IOC_CLKHXT:
-		if (copy_from_user((void *)&param, (const void *)arg,
+		if (copy_from_user((void *)&param, (const void __user *)arg,
 				   sizeof(unsigned int)))
 			return -EFAULT;
 		// switch clock source
-		timer_SwitchClkSrc(param, t);
+		timer_switch_clk_src(param, t);
 		break;
 
 	case TMR_IOC_STOP:
@@ -439,7 +440,7 @@ static long timer_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		break;
 
 	case TMR_IOC_PERIODIC:
-		if (copy_from_user((void *)&param, (const void *)arg,
+		if (copy_from_user((void *)&param, (const void __user *)arg,
 				   sizeof(unsigned int)))
 			return -EFAULT;
 
@@ -459,7 +460,7 @@ static long timer_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		break;
 
 	case TMR_IOC_PERIODIC_FOR_WKUP:
-		if (copy_from_user((void *)&param, (const void *)arg,
+		if (copy_from_user((void *)&param, (const void __user *)arg,
 				   sizeof(unsigned int)))
 			return -EFAULT;
 
@@ -470,7 +471,7 @@ static long timer_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		// check clock, power down mode using 32kHz
 		if (t->clksel != 0x1) {
 			if (t->clksel != 0x5) {
-				timer_SwitchClkSrc(1, t);
+				timer_switch_clk_src(1, t);
 				pr_warn("Power down mode clock need to switch to 32k.\n");
 				return -1;
 			}
@@ -490,7 +491,7 @@ static long timer_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	case TMR_IOC_TOGGLE:
 		// get output duty in us
-		if (copy_from_user((void *)&param, (const void *)arg,
+		if (copy_from_user((void *)&param, (const void __user *)arg,
 				   sizeof(unsigned int)))
 			return -EFAULT;
 		// divide by 2 because a duty cycle is high + low
@@ -511,7 +512,7 @@ static long timer_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	case TMR_IOC_EVENT_COUNTING:
 		// get capture setting
-		if (copy_from_user((void *)&param, (const void *)arg,
+		if (copy_from_user((void *)&param, (const void __user *)arg,
 				   sizeof(unsigned int)))
 			return -EFAULT;
 
@@ -528,7 +529,7 @@ static long timer_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	case TMR_IOC_FREE_COUNTING:
 		// get capture setting
-		if (copy_from_user((void *)&param, (const void *)arg,
+		if (copy_from_user((void *)&param, (const void __user *)arg,
 				   sizeof(unsigned int)))
 			return -EFAULT;
 
@@ -547,7 +548,7 @@ static long timer_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	case TMR_IOC_TRIGGER_COUNTING:
 		// get capture setting
-		if (copy_from_user((void *)&param, (const void *)arg,
+		if (copy_from_user((void *)&param, (const void __user *)arg,
 				   sizeof(unsigned int)))
 			return -EFAULT;
 
@@ -568,14 +569,14 @@ static long timer_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	return 0;
 }
 
-static unsigned int timer_poll(struct file *filp, poll_table *wait)
+static __poll_t timer_poll(struct file *filp, poll_table *wait)
 {
 	struct ma35d1_timer *t = (struct ma35d1_timer *)filp->private_data;
-	unsigned int mask = 0;
+	__poll_t mask = 0;
 
 	poll_wait(filp, &t->wq, wait);
 	if (t->update)
-		mask |= (POLLIN | POLLRDNORM);
+		mask |= (EPOLLIN | EPOLLRDNORM);
 	return mask;
 }
 
@@ -671,7 +672,7 @@ static int ma35d1_timer_probe(struct platform_device *pdev)
 	ch = val32[0];
 	tmr[ch] = devm_kzalloc(&pdev->dev, sizeof(struct ma35d1_timer),
 			       GFP_KERNEL);
-	if (tmr[ch] == NULL)
+	if (!tmr[ch])
 		return -ENOMEM;
 
 	tmr[ch]->base = devm_platform_ioremap_resource(pdev, 0);
@@ -791,7 +792,6 @@ MODULE_DEVICE_TABLE(of, ma35d1_tmr_of_match);
 
 static struct platform_driver ma35d1_tmr_driver = {
 	.driver		= {
-		.owner	= THIS_MODULE,
 		.name	= "ma35d1-timer",
 		.of_match_table = of_match_ptr(ma35d1_tmr_of_match),
 	},
