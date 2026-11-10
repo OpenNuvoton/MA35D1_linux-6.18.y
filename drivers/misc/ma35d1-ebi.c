@@ -36,48 +36,48 @@ struct ebi_dev {
 	void __iomem  *reg_base;
 	u8 bank;
 	unsigned int busmode;
-	unsigned int csactiveLevel;
+	unsigned int cs_active_level;
 	unsigned int datawidth;
 	unsigned int MCLKDIV;
-	unsigned int tALE;
-	unsigned int tACC;
-	unsigned int tAHD;
+	unsigned int t_ale;
+	unsigned int t_acc;
+	unsigned int t_ahd;
 	unsigned int IDLE;
 };
 
 static struct ebi_dev *ebi[EBI_CH];
 
-static inline void ma35d1_set_ebi_ctl(u8 u8Bank)
+static inline void ma35d1_set_ebi_ctl(u8 bank)
 {
-	void __iomem *EBIBaseAddr = ebi[u8Bank]->reg_base;
-	unsigned int TIMIING_CTL, TIMIING_TCTL;
+	void __iomem *base = ebi[bank]->reg_base;
+	unsigned int timing_ctl, timing_tctl;
 
-	if (ebi[u8Bank]->busmode == EBI_OPMODE_ADSEPARATE)
-		writel_relaxed(readl_relaxed(EBIBaseAddr) | EBI_CTL_ADSEPEN_Msk, EBIBaseAddr);
+	if (ebi[bank]->busmode == EBI_OPMODE_ADSEPARATE)
+		writel_relaxed(readl_relaxed(base) | EBI_CTL_ADSEPEN_MSK, base);
 	else
-		writel_relaxed(readl_relaxed(EBIBaseAddr) & ~EBI_CTL_ADSEPEN_Msk, EBIBaseAddr);
+		writel_relaxed(readl_relaxed(base) & ~EBI_CTL_ADSEPEN_MSK, base);
 
-	if (ebi[u8Bank]->csactiveLevel == EBI_CS_ACTIVE_LOW)
-		writel_relaxed(readl_relaxed(EBIBaseAddr) & ~EBI_CTL_CSPOLINV_Msk, EBIBaseAddr);
+	if (ebi[bank]->cs_active_level == EBI_CS_ACTIVE_LOW)
+		writel_relaxed(readl_relaxed(base) & ~EBI_CTL_CSPOLINV_MSK, base);
 	else
-		writel_relaxed(readl_relaxed(EBIBaseAddr) | EBI_CTL_CSPOLINV_Msk, EBIBaseAddr);
+		writel_relaxed(readl_relaxed(base) | EBI_CTL_CSPOLINV_MSK, base);
 
-	if (ebi[u8Bank]->datawidth == EBI_BUSWIDTH_8BIT)
-		writel_relaxed(readl_relaxed(EBIBaseAddr) & ~EBI_CTL_DW16_Msk, EBIBaseAddr);
+	if (ebi[bank]->datawidth == EBI_BUSWIDTH_8BIT)
+		writel_relaxed(readl_relaxed(base) & ~EBI_CTL_DW16_MSK, base);
 	else
-		writel_relaxed(readl_relaxed(EBIBaseAddr) | EBI_CTL_DW16_Msk, EBIBaseAddr);
+		writel_relaxed(readl_relaxed(base) | EBI_CTL_DW16_MSK, base);
 
-	TIMIING_CTL = (readl_relaxed(EBIBaseAddr) & ~(EBI_CTL_MCLKDIV_Msk | EBI_CTL_TALE_Msk)) |
-			((ebi[u8Bank]->MCLKDIV) << EBI_CTL_MCLKDIV_Pos) |
-			((ebi[u8Bank]->tALE) << EBI_CTL_TALE_Pos);
+	timing_ctl = (readl_relaxed(base) & ~(EBI_CTL_MCLKDIV_MSK | EBI_CTL_TALE_MSK)) |
+			((ebi[bank]->MCLKDIV) << EBI_CTL_MCLKDIV_POS) |
+			((ebi[bank]->t_ale) << EBI_CTL_TALE_POS);
 
-	writel_relaxed(TIMIING_CTL | EBI_CTL_EN_Msk, EBIBaseAddr);
+	writel_relaxed(timing_ctl | EBI_CTL_EN_MSK, base);
 
-	TIMIING_TCTL = ((ebi[u8Bank]->tACC) << EBI_TCTL_TACC_Pos) |
-			((ebi[u8Bank]->tAHD) << EBI_TCTL_TAHD_Pos) |
-			((ebi[u8Bank]->IDLE) << EBI_TCTL_W2X_Pos) |
-			((ebi[u8Bank]->IDLE) << EBI_TCTL_R2R_Pos);
-	writel_relaxed(TIMIING_TCTL, EBIBaseAddr+REG_EBI_TCTL);
+	timing_tctl = ((ebi[bank]->t_acc) << EBI_TCTL_TACC_POS) |
+			((ebi[bank]->t_ahd) << EBI_TCTL_TAHD_POS) |
+			((ebi[bank]->IDLE) << EBI_TCTL_W2X_POS) |
+			((ebi[bank]->IDLE) << EBI_TCTL_R2R_POS);
+	writel_relaxed(timing_tctl, base + REG_EBI_TCTL);
 }
 
 static long ebi_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
@@ -90,8 +90,8 @@ static long ebi_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case EBI_IOC_SET:
-		if (copy_from_user((void *)&sebi, (const void *)arg,
-			sizeof(struct ma35d1_set_ebi)))
+		if (copy_from_user((void *)&sebi, (const void __user *)arg,
+				   sizeof(struct ma35d1_set_ebi)))
 			return -EFAULT;
 
 		ch = pebi->bank;
@@ -154,18 +154,17 @@ static struct miscdevice ebi_dev[] = {
 	},
 };
 
-
 static int ebi_mmap(struct file *filp, struct vm_area_struct *vma)
 {
 	struct ebi_dev *t = (struct ebi_dev *)filp->private_data;
-	unsigned long pageFrameNo = 0, size;
+	unsigned long page_frame_no = 0, size;
 
-	pageFrameNo = __phys_to_pfn(t->bank_addr[t->bank]);
+	page_frame_no = __phys_to_pfn(t->bank_addr[t->bank]);
 
 	size = vma->vm_end - vma->vm_start;
 	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
 	vm_flags_set(vma, VM_DONTEXPAND | VM_DONTDUMP);
-	if (remap_pfn_range(vma, vma->vm_start, pageFrameNo, size, vma->vm_page_prot)) {
+	if (remap_pfn_range(vma, vma->vm_start, page_frame_no, size, vma->vm_page_prot)) {
 		pr_err("ma35d1_mem_mmap() : remap_pfn_range() failed !\n");
 		return -EINVAL;
 	}
@@ -178,14 +177,13 @@ static int ma35d1_ebi_probe(struct platform_device *pdev)
 	unsigned int ch;
 	int ret;
 
-	if (of_property_read_u32_array(pdev->dev.of_node, "bank", &ch,
-					1) != 0) {
+	if (of_property_read_u32_array(pdev->dev.of_node, "bank", &ch, 1) != 0) {
 		dev_err(&pdev->dev, "can not get bank!\n");
 		return -EINVAL;
 	}
 
 	ebi[ch] = devm_kzalloc(&pdev->dev, sizeof(struct ebi_dev), GFP_KERNEL);
-	if (ebi[ch] == NULL)
+	if (!ebi[ch])
 		return -ENOMEM;
 
 	ebi[ch]->reg_base = devm_platform_ioremap_resource(pdev, 0);
@@ -222,7 +220,8 @@ static int ma35d1_ebi_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "EBI 'busmode' cannot be read!\n");
 		return ret;
 	}
-	ret = of_property_read_u32_array(pdev->dev.of_node, "csactiveLevel", &ebi[ch]->csactiveLevel, 1);
+	ret = of_property_read_u32_array(pdev->dev.of_node, "csactiveLevel",
+					 &ebi[ch]->cs_active_level, 1);
 	if (ret) {
 		dev_err(&pdev->dev, "EBI 'csactiveLevel' cannot be read!\n");
 		return ret;
@@ -232,17 +231,17 @@ static int ma35d1_ebi_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "EBI 'datawidth' cannot be read!\n");
 		return ret;
 	}
-	ret = of_property_read_u32_array(pdev->dev.of_node, "tALE", &ebi[ch]->tALE, 1);
+	ret = of_property_read_u32_array(pdev->dev.of_node, "tALE", &ebi[ch]->t_ale, 1);
 	if (ret) {
 		dev_err(&pdev->dev, "EBI Timing control 'tALE' cannot be read!\n");
 		return ret;
 	}
-	ret = of_property_read_u32_array(pdev->dev.of_node, "tACC", &ebi[ch]->tACC, 1);
+	ret = of_property_read_u32_array(pdev->dev.of_node, "tACC", &ebi[ch]->t_acc, 1);
 	if (ret) {
 		dev_err(&pdev->dev, "EBI Timing control 'tACC' cannot be read!\n");
 		return ret;
 	}
-	ret = of_property_read_u32_array(pdev->dev.of_node, "tAHD", &ebi[ch]->tAHD, 1);
+	ret = of_property_read_u32_array(pdev->dev.of_node, "tAHD", &ebi[ch]->t_ahd, 1);
 	if (ret) {
 		dev_err(&pdev->dev, "EBI Timing control 'tAHD' cannot be read!\n");
 		return ret;
@@ -273,7 +272,6 @@ static void ma35d1_ebi_remove(struct platform_device *pdev)
 	clk_disable(ebi[ch]->clk);
 	clk_put(ebi[ch]->clk);
 	misc_deregister(&ebi_dev[ch]);
-
 }
 
 static const struct of_device_id ma35d1_ebi_of_match[] = {
@@ -286,7 +284,6 @@ MODULE_DEVICE_TABLE(of, ma35d1_ebi_of_match);
 
 static struct platform_driver ma35d1_ebi_driver = {
 	.driver = {
-		.owner  = THIS_MODULE,
 		.name = "ma35d1-ebi",
 		.of_match_table = of_match_ptr(ma35d1_ebi_of_match),
 	},
