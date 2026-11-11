@@ -145,19 +145,18 @@ enum ma35d1_pll_mode {
 #define VSIPLLCTL2_SLOPE_POS	(0)
 #define VSIPLLCTL2_SLOPE_MSK	(0xfffffful << VSIPLLCTL2_SLOPE_POS)
 
-
 struct clk_hw *ma35d1_reg_clk_pll(enum ma35d1_pll_type type, u8 u8mode,
-				 const char *name, const char *parent,
-				 unsigned long targetFreq,
-				 void __iomem *base,
-				 struct regmap *regmap);
+				  const char *name, const char *parent,
+				  unsigned long target_freq,
+				  void __iomem *base,
+				  struct regmap *regmap);
 
 struct clk_hw *ma35d1_reg_adc_clkdiv(struct device *dev,
-				    const char *name,
-				    const char *parent_name,
-				    unsigned long flags,
-				    void __iomem *reg, u8 shift,
-				    u8 width);
+				     const char *name,
+				     const char *parent_name,
+				     unsigned long flags,
+				     void __iomem *reg, u8 shift,
+				     u8 width);
 
 extern spinlock_t ma35d1_lock;
 

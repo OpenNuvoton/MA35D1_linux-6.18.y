@@ -15,8 +15,8 @@
 
 #include "clk-ma35d1.h"
 
-#define to_ma35d1_clk_pll(clk) \
-	(container_of(clk, struct ma35d1_clk_pll, clk))
+#define to_ma35d1_clk_pll(_hw) \
+	(container_of(_hw, struct ma35d1_clk_pll, hw))
 
 #define PLL0CTL0_FBDIV_MSK	GENMASK(7, 0)
 #define PLL0CTL0_INDIV_MSK	GENMASK(11, 8)
@@ -59,7 +59,7 @@ static const struct vsipll_freq_conf_reg_tbl ma35d1pll_freq[] = {
 	{ }
 };
 
-static void CLK_UnLockReg(struct ma35d1_clk_pll *pll)
+static void clk_unlock_reg(struct ma35d1_clk_pll *pll)
 {
 	int ret;
 
@@ -72,122 +72,123 @@ static void CLK_UnLockReg(struct ma35d1_clk_pll *pll)
 	} while (ret == 0);
 }
 
-static void CLK_LockReg(struct ma35d1_clk_pll *pll)
+static void clk_lock_reg(struct ma35d1_clk_pll *pll)
 {
 	/* Lock PLL registers */
 	regmap_write(pll->regmap, REG_SYS_RLKTZNS, 0x0);
 }
 
 /* SMIC PLL for CAPLL */
-static unsigned long CLK_GetPLLFreq_SMICPLL(struct ma35d1_clk_pll *pll,
-					    unsigned long PllSrcClk)
+static unsigned long clk_get_pll_freq_smicpll(struct ma35d1_clk_pll *pll,
+					      unsigned long pll_src_clk)
 {
-	u32 u32M, u32N, u32P, u32OutDiv;
+	u32 m, n, p, out_div;
 	u32 val;
-	unsigned long u64PllClk;
-	u32 clk_div_table[] = { 1, 2, 4, 8};
+	unsigned long pll_clk;
+	u32 clk_div_table[] = { 1, 2, 4, 8 };
 
 	val = __raw_readl(pll->ctl0_base);
 
-	u32N = FIELD_GET(PLL0CTL0_FBDIV_MSK, val);
-	u32M = FIELD_GET(PLL0CTL0_INDIV_MSK, val);
-	u32P = FIELD_GET(PLL0CTL0_OUTDIV_MSK, val);
-	u32OutDiv = clk_div_table[u32P];
+	n = FIELD_GET(PLL0CTL0_FBDIV_MSK, val);
+	m = FIELD_GET(PLL0CTL0_INDIV_MSK, val);
+	p = FIELD_GET(PLL0CTL0_OUTDIV_MSK, val);
+	out_div = clk_div_table[p];
 
 	if (val & PLL0CTL0_BP_MSK) {
-		u64PllClk = PllSrcClk;
+		pll_clk = pll_src_clk;
 	} else {
-		u64PllClk = PllSrcClk * u32N;
-		do_div(u64PllClk, u32M * u32OutDiv);
+		pll_clk = pll_src_clk * n;
+		do_div(pll_clk, m * out_div);
 	}
 
-	return u64PllClk;
+	return pll_clk;
 }
 
 /* VSI-PLL: INTEGER_MODE */
-static unsigned long CLK_CalPLLFreq_Mode0(unsigned long PllSrcClk,
-					  unsigned long u64PllFreq, u32 *u32Reg)
+static unsigned long clk_cal_pll_freq_mode0(unsigned long pll_src_clk,
+					    unsigned long pll_freq, u32 *reg)
 {
-	u32 u32TmpM, u32TmpN, u32TmpP;
-	u32 u32RngMinN, u32RngMinM, u32RngMinP;
-	u32 u32RngMaxN, u32RngMaxM, u32RngMaxP;
-	u32 u32Tmp, u32Min, u32MinN, u32MinM, u32MinP;
-	unsigned long u64PllClk;
-	unsigned long u64Con1, u64Con2, u64Con3;
+	u32 tmp_m, tmp_n, tmp_p;
+	u32 rng_min_n, rng_min_m, rng_min_p;
+	u32 rng_max_n, rng_max_m, rng_max_p;
+	u32 tmp, min, min_n, min_m, min_p;
+	unsigned long pll_clk;
+	unsigned long con1, con2, con3;
 
-	u64PllClk = 0;
-	u32Min = (u32) -1;
+	pll_clk = 0;
+	min = (u32)-1;
 
-	if (!((u64PllFreq >= VSIPLL_FCLKO_MIN_FREQ)
-	      && (u64PllFreq <= VSIPLL_FCLKO_MAX_FREQ))) {
-		u32Reg[0] = ma35d1pll_freq[0].ctl0_reg;
-		u32Reg[1] = ma35d1pll_freq[0].ctl1_reg;
-		u64PllClk = ma35d1pll_freq[0].freq;
+	if (!(pll_freq >= VSIPLL_FCLKO_MIN_FREQ &&
+	      pll_freq <= VSIPLL_FCLKO_MAX_FREQ)) {
+		reg[0] = ma35d1pll_freq[0].ctl0_reg;
+		reg[1] = ma35d1pll_freq[0].ctl1_reg;
+		pll_clk = ma35d1pll_freq[0].freq;
 
-		return u64PllClk;
+		return pll_clk;
 	}
 
-	u32RngMinM = 1UL;
-	u32RngMaxM = 63UL;
+	rng_min_m = 1UL;
+	rng_max_m = 63UL;
 
-	u32RngMinM = ((PllSrcClk / VSIPLL_FREFDIVM_MAX_FREQ) > 1) ?
-			(PllSrcClk / VSIPLL_FREFDIVM_MAX_FREQ) : 1;
-	u32RngMaxM = ((PllSrcClk / VSIPLL_FREFDIVM_MIN_FREQ0) < u32RngMaxM) ?
-			(PllSrcClk / VSIPLL_FREFDIVM_MIN_FREQ0) : u32RngMaxM;
+	rng_min_m = ((pll_src_clk / VSIPLL_FREFDIVM_MAX_FREQ) > 1) ?
+			(pll_src_clk / VSIPLL_FREFDIVM_MAX_FREQ) : 1;
+	rng_max_m = ((pll_src_clk / VSIPLL_FREFDIVM_MIN_FREQ0) < rng_max_m) ?
+			(pll_src_clk / VSIPLL_FREFDIVM_MIN_FREQ0) : rng_max_m;
 
-	for (u32TmpM = u32RngMinM; u32TmpM < (u32RngMaxM + 1); u32TmpM++) {
-		u64Con1 = PllSrcClk / u32TmpM;
+	for (tmp_m = rng_min_m; tmp_m < (rng_max_m + 1); tmp_m++) {
+		con1 = pll_src_clk / tmp_m;
 
-		u32RngMinN = 16UL;
-		u32RngMaxN = 2047UL;
+		rng_min_n = 16UL;
+		rng_max_n = 2047UL;
 
-		u32RngMinN = ((VSIPLL_FCLK_MIN_FREQ / u64Con1) > u32RngMinN) ?
-				(VSIPLL_FCLK_MIN_FREQ / u64Con1) : u32RngMinN;
-		u32RngMaxN = ((VSIPLL_FCLK_MAX_FREQ / u64Con1) < u32RngMaxN) ?
-				(VSIPLL_FCLK_MAX_FREQ / u64Con1) : u32RngMaxN;
+		rng_min_n = ((VSIPLL_FCLK_MIN_FREQ / con1) > rng_min_n) ?
+				(VSIPLL_FCLK_MIN_FREQ / con1) : rng_min_n;
+		rng_max_n = ((VSIPLL_FCLK_MAX_FREQ / con1) < rng_max_n) ?
+				(VSIPLL_FCLK_MAX_FREQ / con1) : rng_max_n;
 
-		for (u32TmpN = u32RngMinN; u32TmpN < (u32RngMaxN + 1); u32TmpN++) {
-			u64Con2 = u64Con1 * u32TmpN;
+		for (tmp_n = rng_min_n; tmp_n < (rng_max_n + 1); tmp_n++) {
+			con2 = con1 * tmp_n;
 
-			u32RngMinP = 1UL;
-			u32RngMaxP = 7UL;
+			rng_min_p = 1UL;
+			rng_max_p = 7UL;
 
-			u32RngMinP = ((u64Con2 / VSIPLL_FCLKO_MAX_FREQ) > 1) ? (u64Con2 /
-					VSIPLL_FCLKO_MAX_FREQ) : 1;
-			u32RngMaxP = ((u64Con2 / VSIPLL_FCLKO_MIN_FREQ) < u32RngMaxP) ?
-					(u64Con2 / VSIPLL_FCLKO_MIN_FREQ) : u32RngMaxP;
-			for (u32TmpP = u32RngMinP; u32TmpP < (u32RngMaxP + 1); u32TmpP++) {
-				u64Con3 = u64Con2 / u32TmpP;
-				if (u64Con3 > u64PllFreq)
-					u32Tmp = u64Con3 - u64PllFreq;
+			rng_min_p = ((con2 / VSIPLL_FCLKO_MAX_FREQ) > 1) ?
+					(con2 / VSIPLL_FCLKO_MAX_FREQ) : 1;
+			rng_max_p = ((con2 / VSIPLL_FCLKO_MIN_FREQ) < rng_max_p) ?
+					(con2 / VSIPLL_FCLKO_MIN_FREQ) : rng_max_p;
+			for (tmp_p = rng_min_p; tmp_p < (rng_max_p + 1); tmp_p++) {
+				con3 = con2 / tmp_p;
+				if (con3 > pll_freq)
+					tmp = con3 - pll_freq;
 				else
-					u32Tmp = u64PllFreq - u64Con3;
+					tmp = pll_freq - con3;
 
-				if (u32Tmp < u32Min) {
-					u32Min = u32Tmp;
-					u32MinM = u32TmpM;
-					u32MinN = u32TmpN;
-					u32MinP = u32TmpP;
+				if (tmp < min) {
+					min = tmp;
+					min_m = tmp_m;
+					min_n = tmp_n;
+					min_p = tmp_p;
 
-					if (u32Min == 0UL) {
-						u32Reg[0] = (u32MinM << 12) | (u32MinN);
-						u32Reg[1] = (u32MinP << 4);
-						return ((PllSrcClk * u32MinN) / (u32MinP * u32MinM));
+					if (min == 0UL) {
+						reg[0] = (min_m << 12) | min_n;
+						reg[1] = min_p << 4;
+						return (pll_src_clk * min_n) / (min_p * min_m);
 					}
 				}
 			}
 		}
 	}
 
-	u32Reg[0] = (u32MinM << 12) | (u32MinN);
-	u32Reg[1] = (u32MinP << 4);
-	u64PllClk = (PllSrcClk * u32MinN) / (u32MinP * u32MinM);
-	return u64PllClk;
+	reg[0] = (min_m << 12) | min_n;
+	reg[1] = min_p << 4;
+	pll_clk = (pll_src_clk * min_n) / (min_p * min_m);
+	return pll_clk;
 }
 
-static unsigned long ma35d1_pll_frac_mode_find_closest(struct ma35d1_clk_pll *pll,
-			unsigned long rate, unsigned long parent_rate, u32 *reg_ctl,
-			unsigned long *freq)
+static unsigned long
+ma35d1_pll_frac_mode_find_closest(struct ma35d1_clk_pll *pll,
+				  unsigned long rate, unsigned long parent_rate,
+				  u32 *reg_ctl, unsigned long *freq)
 {
 	unsigned long min_diff = ULONG_MAX;
 	unsigned long fref, fclko_expect, fclko_best;
@@ -203,7 +204,7 @@ static unsigned long ma35d1_pll_frac_mode_find_closest(struct ma35d1_clk_pll *pl
 
 				fclk = (fref * n) / m;
 				if ((fclk < (VSIPLL_FCLK_MIN_FREQ / 1000) ||
-				    (fclk > VSIPLL_FCLK_MAX_FREQ / 1000)))
+				     (fclk > VSIPLL_FCLK_MAX_FREQ / 1000)))
 					continue; /* constrain */
 
 				fout = fclk / p;
@@ -247,11 +248,12 @@ search_done:
 	return fclko_best * 1000;
 }
 
-static unsigned long CLK_SetPLLFreq(struct ma35d1_clk_pll *pll, unsigned long PllSrcClk,
-				    unsigned long u64PllFreq)
+static unsigned long clk_set_pll_freq(struct ma35d1_clk_pll *pll,
+				      unsigned long pll_src_clk,
+				      unsigned long pll_freq)
 {
-	u32 u32Reg[3] = { 0 }, val_ctl0, val_ctl1, val_ctl2;
-	unsigned long u64PllClk;
+	u32 reg[3] = { 0 }, val_ctl0, val_ctl1, val_ctl2;
+	unsigned long pll_clk;
 
 	val_ctl0 = __raw_readl(pll->ctl0_base);
 	val_ctl1 = __raw_readl(pll->ctl1_base);
@@ -259,79 +261,72 @@ static unsigned long CLK_SetPLLFreq(struct ma35d1_clk_pll *pll, unsigned long Pl
 
 	switch (pll->mode) {
 	case VSIPLL_INTEGER_MODE:
-		u64PllClk = CLK_CalPLLFreq_Mode0(PllSrcClk, u64PllFreq, u32Reg);
-		val_ctl0 = u32Reg[0] | (VSIPLL_INTEGER_MODE << VSIPLLCTL0_MODE_POS);
+		pll_clk = clk_cal_pll_freq_mode0(pll_src_clk, pll_freq, reg);
+		val_ctl0 = reg[0] | (VSIPLL_INTEGER_MODE << VSIPLLCTL0_MODE_POS);
 		break;
 	case VSIPLL_FRACTIONAL_MODE:
 	case VSIPLL_SS_MODE:
-		u64PllClk = ma35d1_pll_frac_mode_find_closest(pll, u64PllFreq,
-							      PllSrcClk, u32Reg,
-							      &u64PllClk);
-		val_ctl0 = u32Reg[0];
+		pll_clk = ma35d1_pll_frac_mode_find_closest(pll, pll_freq,
+							    pll_src_clk, reg,
+							    &pll_clk);
+		val_ctl0 = reg[0];
 		break;
 	}
 
-	/* keep the current power state: a PLL that is already running (prepare
-	 * count held by others, e.g. VPLL) must not be left powered down */
-	val_ctl1 = (val_ctl1 & VSIPLLCTL1_PD_MSK) | u32Reg[1];
-	val_ctl2 = u32Reg[2];
+	/*
+	 * Keep the current power state: a PLL that is already running (prepare
+	 * count held by others, e.g. VPLL) must not be left powered down.
+	 */
+	val_ctl1 = (val_ctl1 & VSIPLLCTL1_PD_MSK) | reg[1];
+	val_ctl2 = reg[2];
 
 	__raw_writel(val_ctl0, pll->ctl0_base);
 	__raw_writel(val_ctl1, pll->ctl1_base);
 	__raw_writel(val_ctl2, pll->ctl2_base);
 
-	return u64PllClk;
+	return pll_clk;
 }
 
-static unsigned long CLK_GetPLLFreq_VSIPLL(struct ma35d1_clk_pll *pll,
-					   unsigned long PllSrcClk)
+static unsigned long clk_get_pll_freq_vsipll(struct ma35d1_clk_pll *pll,
+					     unsigned long pll_src_clk)
 {
-	u32 u32M, u32N, u32P, u32X, u32SR, u32FMOD;
-	u32 val_ctl0, val_ctl1, val_ctl2;
-	unsigned long u64PllClk, u64X;
+	u32 m, n, p, x;
+	u32 val_ctl0, val_ctl1;
+	unsigned long pll_clk, x64;
 
 	val_ctl0 = __raw_readl(pll->ctl0_base);
 	val_ctl1 = __raw_readl(pll->ctl1_base);
-	val_ctl2 = __raw_readl(pll->ctl2_base);
 
 	if (val_ctl1 & PLLXCTL1_BP_MSK) {
-		u64PllClk = PllSrcClk;
-		return u64PllClk;
+		pll_clk = pll_src_clk;
+		return pll_clk;
 	}
+
+	n = FIELD_GET(PLLXCTL0_FBDIV_MSK, val_ctl0);
+	m = FIELD_GET(PLLXCTL0_INDIV_MSK, val_ctl0);
+	p = FIELD_GET(PLLXCTL1_OUTDIV_MSK, val_ctl1);
 
 	if (pll->mode == VSIPLL_INTEGER_MODE) {
-		u32N = FIELD_GET(PLLXCTL0_FBDIV_MSK, val_ctl0);
-		u32M = FIELD_GET(PLLXCTL0_INDIV_MSK, val_ctl0);
-		u32P = FIELD_GET(PLLXCTL1_OUTDIV_MSK, val_ctl1);
-
-		u64PllClk = PllSrcClk * u32N;
-		do_div(u64PllClk, u32M * u32P);
+		pll_clk = pll_src_clk * n;
+		do_div(pll_clk, m * p);
 
 	} else if (pll->mode == VSIPLL_FRACTIONAL_MODE) {
-		u32N = FIELD_GET(PLLXCTL0_FBDIV_MSK, val_ctl0);
-		u32M = FIELD_GET(PLLXCTL0_INDIV_MSK, val_ctl0);
-		u32P = FIELD_GET(PLLXCTL1_OUTDIV_MSK, val_ctl1);
-		u32X = FIELD_GET(PLLXCTL1_FRAC_MSK, val_ctl1);
+		x = FIELD_GET(PLLXCTL1_FRAC_MSK, val_ctl1);
 
-		u64X = (u64) u32X;
-		u64X = (((u64X * 1000) + 500) >> 24);
-		u64PllClk = (PllSrcClk * ((u32N * 1000) + u64X)) / 1000 / u32P / u32M;
+		x64 = (u64)x;
+		x64 = ((x64 * 1000) + 500) >> 24;
+		pll_clk = (pll_src_clk * ((n * 1000) + x64)) / 1000 / p / m;
 
 	} else {
-		u32N = FIELD_GET(PLLXCTL0_FBDIV_MSK, val_ctl0);
-		u32M = FIELD_GET(PLLXCTL0_INDIV_MSK, val_ctl0);
-		u32SR = FIELD_GET(PLLXCTL0_SSRATE_MSK, val_ctl0);
-		u32P = FIELD_GET(PLLXCTL1_OUTDIV_MSK, val_ctl1);
-		u32X = FIELD_GET(PLLXCTL1_FRAC_MSK, val_ctl1);
-		u32FMOD = FIELD_GET(PLLXCTL2_SLOPE_MSK, val_ctl2);
+		x = FIELD_GET(PLLXCTL1_FRAC_MSK, val_ctl1);
 
-		u64X = (u64) u32X;
-		u64X = ((u64X * 1000) >> 24);
+		x64 = (u64)x;
+		x64 = (x64 * 1000) >> 24;
 
-		u64PllClk = (PllSrcClk * ((u32N * 1000) + u64X)) / 1000 / u32P / u32M;
+		pll_clk = (pll_src_clk * ((n * 1000) + x64)) / 1000 / p / m;
 	}
 
-	return u64PllClk;
+	return pll_clk;
 }
 
 static int ma35d1_clk_pll_set_rate(struct clk_hw *hw, unsigned long rate,
@@ -339,17 +334,17 @@ static int ma35d1_clk_pll_set_rate(struct clk_hw *hw, unsigned long rate,
 {
 	struct ma35d1_clk_pll *pll = to_ma35d1_clk_pll(hw);
 
-	if ((parent_rate < VSIPLL_FREF_MIN_FREQ) || (parent_rate > VSIPLL_FREF_MAX_FREQ))
+	if (parent_rate < VSIPLL_FREF_MIN_FREQ || parent_rate > VSIPLL_FREF_MAX_FREQ)
 		return 0;
 
-	if ((pll->type == MA35D1_CAPLL) || (pll->type == MA35D1_DDRPLL)) {
+	if (pll->type == MA35D1_CAPLL || pll->type == MA35D1_DDRPLL) {
 		pr_warn("Nuvoton MA35D1 CAPLL/DDRPLL Read Only.\n");
 		return 0;
 	}
 
-	CLK_UnLockReg(pll);
-	pll->rate = CLK_SetPLLFreq(pll, parent_rate, rate);
-	CLK_LockReg(pll);
+	clk_unlock_reg(pll);
+	pll->rate = clk_set_pll_freq(pll, parent_rate, rate);
+	clk_lock_reg(pll);
 
 	return 0;
 }
@@ -360,19 +355,19 @@ static unsigned long ma35d1_clk_pll_recalc_rate(struct clk_hw *hw,
 	unsigned long pllfreq;
 	struct ma35d1_clk_pll *pll = to_ma35d1_clk_pll(hw);
 
-	if ((parent_rate < VSIPLL_FREF_MIN_FREQ)
-	    || (parent_rate > VSIPLL_FREF_MAX_FREQ))
+	if (parent_rate < VSIPLL_FREF_MIN_FREQ ||
+	    parent_rate > VSIPLL_FREF_MAX_FREQ)
 		return 0;
 
 	switch (pll->type) {
 	case MA35D1_CAPLL:
-		pllfreq = CLK_GetPLLFreq_SMICPLL(pll, parent_rate);
+		pllfreq = clk_get_pll_freq_smicpll(pll, parent_rate);
 		break;
 	case MA35D1_DDRPLL:
 	case MA35D1_APLL:
 	case MA35D1_EPLL:
 	case MA35D1_VPLL:
-		pllfreq = CLK_GetPLLFreq_VSIPLL(pll, parent_rate);
+		pllfreq = clk_get_pll_freq_vsipll(pll, parent_rate);
 		break;
 	}
 
@@ -399,16 +394,16 @@ static int ma35d1_clk_pll_prepare(struct clk_hw *hw)
 	struct ma35d1_clk_pll *pll = to_ma35d1_clk_pll(hw);
 	u32 val;
 
-	if ((pll->type == MA35D1_CAPLL) || (pll->type == MA35D1_DDRPLL)) {
+	if (pll->type == MA35D1_CAPLL || pll->type == MA35D1_DDRPLL) {
 		pr_warn("Nuvoton MA35D1 CAPLL/DDRPLL Enable Only.\n");
 		return 0;
 	}
 
-	CLK_UnLockReg(pll);
+	clk_unlock_reg(pll);
 	val = __raw_readl(pll->ctl1_base);
 	val &= ~VSIPLLCTL1_PD_MSK;
 	__raw_writel(val, pll->ctl1_base);
-	CLK_LockReg(pll);
+	clk_lock_reg(pll);
 
 	return 0;
 }
@@ -418,9 +413,9 @@ static void ma35d1_clk_pll_unprepare(struct clk_hw *hw)
 	struct ma35d1_clk_pll *pll = to_ma35d1_clk_pll(hw);
 	u32 val;
 
-	if ((pll->type == MA35D1_CAPLL) || (pll->type == MA35D1_DDRPLL))
+	if (pll->type == MA35D1_CAPLL || pll->type == MA35D1_DDRPLL) {
 		pr_warn("Nuvoton MA35D1 CAPLL/DDRPLL Cannot disable.\n");
-	else {
+	} else {
 		val = __raw_readl(pll->ctl1_base);
 		val |= VSIPLLCTL1_PD_MSK;
 		__raw_writel(val, pll->ctl1_base);
@@ -438,7 +433,7 @@ static const struct clk_ops ma35d1_clk_pll_ops = {
 
 struct clk_hw *ma35d1_reg_clk_pll(enum ma35d1_pll_type type,
 				  u8 u8mode, const char *name,
-				  const char *parent, unsigned long targetFreq,
+				  const char *parent, unsigned long target_freq,
 				  void __iomem *base, struct regmap *regmap)
 {
 	struct ma35d1_clk_pll *pll;
@@ -452,7 +447,7 @@ struct clk_hw *ma35d1_reg_clk_pll(enum ma35d1_pll_type type,
 
 	pll->type = type;
 	pll->mode = u8mode;
-	pll->rate = targetFreq;
+	pll->rate = target_freq;
 	pll->ctl0_base = base + VSIPLL_CTL0;
 	pll->ctl1_base = base + VSIPLL_CTL1;
 	pll->ctl2_base = base + VSIPLL_CTL2;

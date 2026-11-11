@@ -22,7 +22,7 @@ struct ma35d1_adc_clk_divider {
 	void __iomem *reg;
 	u8 shift;
 	u8 width;
-	spinlock_t *lock;
+	spinlock_t *lock;	/* serializes divider register read-modify-write */
 };
 
 #define to_ma35d1_adc_clk_divider(_hw)	\
