@@ -142,7 +142,7 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 			ctx->reg_ctl &= ~HMAC_CTL_DMACSCAD;
 	}
 
-	if ((tctx->hash_mode & HMAC_CTL_SHA3EN) && (ctx->bufcnt == 0)) {
+	if ((tctx->hash_mode & HMAC_CTL_SHA3EN) && ctx->bufcnt == 0) {
 		/* workaround for MA35D1 SHA3 in case of DMACNT is 0 */
 		ctx->reg_ctl |= HMAC_CTL_DMACSCAD;
 	}
@@ -174,7 +174,7 @@ static void  ma35_sha_get_result(struct ahash_request *req)
 	int i;
 
 	/* Get the hash from the digest buffer */
-	for (i = 0; i < ctx->digest_len/4; i++)
+	for (i = 0; i < ctx->digest_len / 4; i++)
 		result[i] = ma35_read_reg(ctx->dd, HMAC_DGST(i));
 	pr_debug("Digest: %08x %08x %08x %08x %08x\n", result[0], result[1], result[2],
 		 result[3], result[4]);
@@ -221,13 +221,13 @@ static int ma35_sha_init(struct ahash_request *req)
 	tctx->hash_mode = 0;
 	if (strncmp(cra_name, "hmac", 4) == 0) {
 		tctx->hash_mode = HMAC_CTL_HMACEN;
-		if (strncmp(cra_name+5, "sha3-", 5) == 0) {
+		if (strncmp(cra_name + 5, "sha3-", 5) == 0) {
 			tctx->hash_mode |= HMAC_CTL_SHA3EN;
 			is_sha3 = true;
 		}
-		if (strncmp(cra_name+5, "sm3", 3) == 0)
+		if (strncmp(cra_name + 5, "sm3", 3) == 0)
 			tctx->hash_mode |= HMAC_CTL_SM3EN;
-		if (strncmp(cra_name+5, "md5", 3) == 0)
+		if (strncmp(cra_name + 5, "md5", 3) == 0)
 			tctx->hash_mode |= HMAC_CTL_MD5EN;
 	} else if (strncmp(cra_name, "sha3-", 5) == 0) {
 		is_sha3 = true;
@@ -253,28 +253,28 @@ static int ma35_sha_init(struct ahash_request *req)
 		break;
 	case SHA224_DIGEST_SIZE:
 		ctx->reg_ctl |= SHA_OPMODE_SHA224;
-		if (is_sha3 == true)
+		if (is_sha3)
 			ctx->block_size = SHA3_224_BLOCK_SIZE;
 		else
 			ctx->block_size = SHA224_BLOCK_SIZE;
 		break;
 	case SHA256_DIGEST_SIZE:
 		ctx->reg_ctl |= SHA_OPMODE_SHA256;
-		if (is_sha3 == true)
+		if (is_sha3)
 			ctx->block_size = SHA3_256_BLOCK_SIZE;
 		else
 			ctx->block_size = SHA256_BLOCK_SIZE;
 		break;
 	case SHA384_DIGEST_SIZE:
 		ctx->reg_ctl |= SHA_OPMODE_SHA384;
-		if (is_sha3 == true)
+		if (is_sha3)
 			ctx->block_size = SHA3_384_BLOCK_SIZE;
 		else
 			ctx->block_size = SHA384_BLOCK_SIZE;
 		break;
 	case SHA512_DIGEST_SIZE:
 		ctx->reg_ctl |= SHA_OPMODE_SHA512;
-		if (is_sha3 == true)
+		if (is_sha3)
 			ctx->block_size = SHA3_512_BLOCK_SIZE;
 		else
 			ctx->block_size = SHA512_BLOCK_SIZE;
@@ -301,7 +301,7 @@ static int ma35_sha_init(struct ahash_request *req)
 
 	/* is HMAC, check key length */
 	if (((tctx->hmac_key_len + ctx->block_size - 1) > HMAC_KEY_BUFF_SIZE) ||
-	    (tctx->hmac_key_len == 0)) {
+	    tctx->hmac_key_len == 0) {
 		pr_err("HMAC key length %d is not supported!\n", tctx->hmac_key_len);
 		return -EINVAL;
 	}
@@ -322,7 +322,6 @@ static void ma35_sha_sg_to_dma_buffer(struct ahash_request *req, struct nu_sha_r
 	int copy_len;
 
 	while (ctx->sg && (ctx->req_len > 0) && (ctx->bufcnt < ctx->dma_max_size)) {
-
 		copy_len = min((int)ctx->sg->length - ctx->sg_off, ctx->req_len);
 		if (ctx->dma_max_size - ctx->bufcnt < copy_len)
 			copy_len = ctx->dma_max_size - ctx->bufcnt;
@@ -346,12 +345,12 @@ static int ma35_sha_update_start(struct nu_sha_dev *dd)
 	struct nu_sha_reqctx *ctx = ahash_request_ctx(dd->req);
 	int err = 0;
 
-	if ((ctx->req_len > 0) &&  (ctx->bufcnt < ctx->dma_max_size))
+	if (ctx->req_len > 0 &&  ctx->bufcnt < ctx->dma_max_size)
 		ma35_sha_sg_to_dma_buffer(dd->req, ctx);
 
 	if (ctx->flags & SHA_FLAGS_KEY_BLK) {
 		if ((ctx->flags & (SHA_FLAGS_FINUP | SHA_FLAGS_FINAL)) &&
-		    (ctx->bufcnt == 0) && (dd->req->nbytes == 0)) {
+		    ctx->bufcnt == 0 && dd->req->nbytes == 0) {
 			pr_err("ma35 hmac does not support 0 data length!\n");
 			ma35_sha_finish_req(ctx, -EINVAL);
 			return -EINVAL;
@@ -367,7 +366,7 @@ static int ma35_sha_update_start(struct nu_sha_dev *dd)
 		 */
 
 		/* Check if it's the final DMA */
-		if ((ctx->flags & (SHA_FLAGS_FINUP | SHA_FLAGS_FINAL)) && (ctx->req_len == 0))
+		if ((ctx->flags & (SHA_FLAGS_FINUP | SHA_FLAGS_FINAL)) && ctx->req_len == 0)
 			ctx->flags |= SHA_FLAGS_FINAL_DMA;
 
 		err = ma35_sha_dma_run(dd, 0);
@@ -401,7 +400,6 @@ static int ma35_sha_update_start(struct nu_sha_dev *dd)
 static int ma35_sha_handle_queue(struct nu_sha_dev *dd, struct ahash_request *req)
 {
 	struct crypto_async_request *async_req, *backlog;
-	struct nu_sha_reqctx *ctx;
 	unsigned long flags;
 	int ret = 0;
 
@@ -431,7 +429,6 @@ static int ma35_sha_handle_queue(struct nu_sha_dev *dd, struct ahash_request *re
 		backlog->complete(backlog, -EINPROGRESS);
 
 	req = ahash_request_cast(async_req);
-	ctx = ahash_request_ctx(req);
 	dd->req = req;
 
 	return ma35_sha_update_start(dd);
@@ -492,7 +489,7 @@ static int ma35_sha_finup(struct ahash_request *req)
 
 	err1 = ma35_sha_update(req);
 	if (err1 == -EINPROGRESS || (err1 == -EBUSY &&
-	    (ahash_request_flags(req) & CRYPTO_TFM_REQ_MAY_BACKLOG)))
+				     (ahash_request_flags(req) & CRYPTO_TFM_REQ_MAY_BACKLOG)))
 		return err1;
 
 	/*
@@ -998,7 +995,7 @@ int ma35_sha_remove(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	struct nu_sha_dev *sha_dd = &crypto_dev->sha_dd;
 	int i;
 
-	if (sha_dd == NULL)
+	if (!sha_dd)
 		return -ENODEV;
 
 	for (i = 0; i < ARRAY_SIZE(ma35_sha_algs); i++)

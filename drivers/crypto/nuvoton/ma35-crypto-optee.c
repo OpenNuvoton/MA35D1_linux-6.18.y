@@ -69,7 +69,7 @@ static int optee_crypto_probe(struct device *dev)
 	sess_arg.clnt_login = TEE_IOCTL_LOGIN_PUBLIC;
 	sess_arg.num_params = 0;
 	ret = tee_client_open_session(ctx, &sess_arg, NULL);
-	if ((ret < 0) || (sess_arg.ret != 0)) {
+	if (ret < 0 || sess_arg.ret != 0) {
 		dev_err(dev, "tee_client_open_session failed, err: %x\n",
 			sess_arg.ret);
 		tee_client_close_context(ctx);
@@ -86,7 +86,7 @@ static int optee_crypto_probe(struct device *dev)
 	inv_arg.session = session_id;
 	inv_arg.num_params = 4;
 	ret = tee_client_invoke_func(ctx, &inv_arg, param);
-	if ((ret < 0) || (inv_arg.ret != 0)) {
+	if (ret < 0 || inv_arg.ret != 0) {
 		dev_err(dev, "PTA_CMD_CRYPTO_INIT invoke err: %x\n",
 			inv_arg.ret);
 		ret = -EINVAL;
@@ -134,7 +134,7 @@ int ma35_crypto_optee_init(struct nu_crypto_dev *crypto_dev)
 
 	if (READ_ONCE(ma35_crypto_optee_faulted))
 		return -EIO;
-	if (crypto_dev->tee_cdev != NULL)
+	if (crypto_dev->tee_cdev)
 		return 0; /* already inited */
 
 	mutex_lock(&optee_register_lock);
@@ -233,7 +233,6 @@ static struct platform_driver ma35_crypto_optee_driver = {
 	.remove = ma35_crypto_optee_remove,
 	.driver = {
 		.name = "ma35-crypto-optee",
-		.owner = THIS_MODULE,
 		.of_match_table = ma35_crypto_optee_of_match,
 	},
 };

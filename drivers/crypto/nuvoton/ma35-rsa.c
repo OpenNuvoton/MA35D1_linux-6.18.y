@@ -77,8 +77,8 @@ static int check_ras_length(struct rsa_key *raw_key)
 
 	rsa_len = check_key_length((u8 *)raw_key->n, raw_key->n_sz);
 
-	if ((rsa_len != 1024) && (rsa_len != 2048) &&
-		(rsa_len != 3072) && (rsa_len != 4096)) {
+	if (rsa_len != 1024 && rsa_len != 2048 &&
+	    rsa_len != 3072 && rsa_len != 4096) {
 		pr_err("rsa length %d is not supported!\n", rsa_len);
 		return -EINVAL;
 	}
@@ -87,7 +87,7 @@ static int check_ras_length(struct rsa_key *raw_key)
 
 static int ma35_rsa_hex_to_reg(u8 *input, int keylen, int rsa_bit_len, u32 *reg)
 {
-	int rsa_byte_len = rsa_bit_len/8;
+	int rsa_byte_len = rsa_bit_len / 8;
 	u8 buff[NU_RSA_MAX_BYTE_LEN];
 	u8 *key;
 	int idx;
@@ -115,9 +115,9 @@ static void ma35_rsa_reg_to_hex(u32 *reg, int rsa_bit_len, u8 *key, int *key_sz)
 	int i, idx;
 
 	*key_sz = 0;
-	for (idx = rsa_bit_len/32 - 1 ; idx >= 0; idx--) {
+	for (idx = rsa_bit_len / 32 - 1 ; idx >= 0; idx--) {
 		for (i = 3; i >= 0; i--) {
-			*key++ = (reg[idx] >> (i*8)) & 0xff;
+			*key++ = (reg[idx] >> (i * 8)) & 0xff;
 			(*key_sz)++;
 			if (*key_sz >= NU_RSA_MAX_BYTE_LEN)
 				return;
@@ -163,7 +163,7 @@ static int ma35_rsa_enc(struct akcipher_request *req)
 	int len, err;
 
 	ctx->dd = dd;
-	keyleng = ctx->rsa_bit_len/1024 - 1;
+	keyleng = ctx->rsa_bit_len / 1024 - 1;
 
 	memset(&ctx->buffer[E_OFF], 0, NU_RSA_MAX_BYTE_LEN);
 
@@ -242,7 +242,7 @@ static int ma35_rsa_dec(struct akcipher_request *req)
 	memset(&ctx->buffer[D_OFF], 0, NU_RSA_MAX_BYTE_LEN);
 
 	err = ma35_rsa_hex_to_reg((u8 *)ctx->private_key, ctx->private_key_size,
-				ctx->rsa_bit_len, (u32 *)&ctx->buffer[D_OFF]);
+				  ctx->rsa_bit_len, (u32 *)&ctx->buffer[D_OFF]);
 	if (err)
 		return err;
 
@@ -308,8 +308,6 @@ static int ma35_rsa_set_pub_key(struct crypto_akcipher *tfm, const void *key,
 	int rsa_bit_len;
 	int err;
 
-	pr_debug("[%s]\n", __func__);
-
 	err = rsa_parse_pub_key(&raw_key, key, keylen);
 	if (err)
 		return err;
@@ -344,8 +342,6 @@ static int ma35_rsa_set_priv_key(struct crypto_akcipher *tfm, const void *key,
 	struct rsa_key raw_key = {0};
 	int rsa_bit_len;
 	int err;
-
-	pr_debug("[%s]\n", __func__);
 
 	err = rsa_parse_priv_key(&raw_key, key, keylen);
 	if (err)
@@ -416,7 +412,7 @@ static int ma35_rsa_ioctl_set_register(struct nu_rsa_ctx *rsa_ctx, int offs,
 	u8 kbuf[520];
 
 	memset(kbuf, 0, sizeof(kbuf));
-	if (copy_from_user(kbuf, (u8 *)arg, 514))
+	if (copy_from_user(kbuf, (u8 __user *)arg, 514))
 		return -EFAULT;
 
 	sz = (kbuf[0] << 8) | kbuf[1];
@@ -493,7 +489,7 @@ static long ma35_rsa_ioctl(struct file *filp, unsigned int cmd, unsigned long ar
 		ma35_write_reg(dd, rsa_ctx->dma_buff + MADR5_OFF, RSA_MADDR5);
 		ma35_write_reg(dd, rsa_ctx->dma_buff + MADR6_OFF, RSA_MADDR6);
 
-		keyleng = rsa_ctx->rsa_bit_len/1024 - 1;
+		keyleng = rsa_ctx->rsa_bit_len / 1024 - 1;
 		ma35_write_reg(dd, (keyleng << RSA_CTL_KEYLENG_OFFSET) |
 			       RSA_CTL_START, RSA_CTL);
 
@@ -513,7 +509,7 @@ static long ma35_rsa_ioctl(struct file *filp, unsigned int cmd, unsigned long ar
 		ma35_rsa_reg_to_hex((u32 *)&rsa_ctx->buffer[ANS_OFF],
 				    rsa_ctx->rsa_bit_len, m, &len);
 
-		if (copy_to_user((char *)arg, m, len))
+		if (copy_to_user((char __user *)arg, m, len))
 			return -EFAULT;
 		break;
 
@@ -576,13 +572,13 @@ int ma35_rsa_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	list_add_tail(&rsa_dd->list, &nu_rsa.dev_list);
 	spin_unlock(&nu_rsa.lock);
 
-	if (crypto_dev->rsa_ioctl == true) {
+	if (crypto_dev->rsa_ioctl) {
 		misc_register(&ma35_rsa_dev);
 	} else {
 		err = crypto_register_akcipher(&ma35_rsa_alg);
 		if (err) {
 			pr_err("[%s] - failed to register ma35_rsa_alg! %d\n",
-				__func__, err);
+			       __func__, err);
 			goto err_out;
 		}
 	}
@@ -600,10 +596,10 @@ int ma35_rsa_remove(struct device *dev, struct nu_crypto_dev *crypto_dev)
 {
 	struct nu_rsa_dev *rsa_dd = &crypto_dev->rsa_dd;
 
-	if (rsa_dd == NULL)
+	if (!rsa_dd)
 		return -ENODEV;
 
-	if (crypto_dev->rsa_ioctl == true)
+	if (crypto_dev->rsa_ioctl)
 		misc_deregister(&ma35_rsa_dev);
 	else
 		crypto_unregister_akcipher(&ma35_rsa_alg);

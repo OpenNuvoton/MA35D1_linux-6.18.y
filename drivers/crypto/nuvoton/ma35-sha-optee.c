@@ -46,23 +46,37 @@
 
 /* TSI rejects a zero-length SHA3 request, so answer the well-known digests here */
 static const u8 sha3_224_empty[SHA3_224_DIGEST_SIZE] = {
-	0x6b, 0x4e, 0x03, 0x42, 0x36, 0x67, 0xdb, 0xb7, 0x3b, 0x6e, 0x15, 0x45, 0x4f, 0x0e,
-	0xb1, 0xab, 0xd4, 0x59, 0x7f, 0x9a, 0x1b, 0x07, 0x8e, 0x3f, 0x5b, 0x5a, 0x6b, 0xc7
+	0x6b, 0x4e, 0x03, 0x42, 0x36, 0x67, 0xdb, 0xb7,
+	0x3b, 0x6e, 0x15, 0x45, 0x4f, 0x0e, 0xb1, 0xab,
+	0xd4, 0x59, 0x7f, 0x9a, 0x1b, 0x07, 0x8e, 0x3f,
+	0x5b, 0x5a, 0x6b, 0xc7
 };
+
 static const u8 sha3_256_empty[SHA3_256_DIGEST_SIZE] = {
-	0xa7, 0xff, 0xc6, 0xf8, 0xbf, 0x1e, 0xd7, 0x66, 0x51, 0xc1, 0x47, 0x56, 0xa0, 0x61, 0xd6, 0x62,
-	0xf5, 0x80, 0xff, 0x4d, 0xe4, 0x3b, 0x49, 0xfa, 0x82, 0xd8, 0x0a, 0x4b, 0x80, 0xf8, 0x43, 0x4a
+	0xa7, 0xff, 0xc6, 0xf8, 0xbf, 0x1e, 0xd7, 0x66,
+	0x51, 0xc1, 0x47, 0x56, 0xa0, 0x61, 0xd6, 0x62,
+	0xf5, 0x80, 0xff, 0x4d, 0xe4, 0x3b, 0x49, 0xfa,
+	0x82, 0xd8, 0x0a, 0x4b, 0x80, 0xf8, 0x43, 0x4a
 };
+
 static const u8 sha3_384_empty[SHA3_384_DIGEST_SIZE] = {
-	0x0c, 0x63, 0xa7, 0x5b, 0x84, 0x5e, 0x4f, 0x7d, 0x01, 0x10, 0x7d, 0x85, 0x2e, 0x4c, 0x24, 0x85,
-	0xc5, 0x1a, 0x50, 0xaa, 0xaa, 0x94, 0xfc, 0x61, 0x99, 0x5e, 0x71, 0xbb, 0xee, 0x98, 0x3a, 0x2a,
-	0xc3, 0x71, 0x38, 0x31, 0x26, 0x4a, 0xdb, 0x47, 0xfb, 0x6b, 0xd1, 0xe0, 0x58, 0xd5, 0xf0, 0x04
+	0x0c, 0x63, 0xa7, 0x5b, 0x84, 0x5e, 0x4f, 0x7d,
+	0x01, 0x10, 0x7d, 0x85, 0x2e, 0x4c, 0x24, 0x85,
+	0xc5, 0x1a, 0x50, 0xaa, 0xaa, 0x94, 0xfc, 0x61,
+	0x99, 0x5e, 0x71, 0xbb, 0xee, 0x98, 0x3a, 0x2a,
+	0xc3, 0x71, 0x38, 0x31, 0x26, 0x4a, 0xdb, 0x47,
+	0xfb, 0x6b, 0xd1, 0xe0, 0x58, 0xd5, 0xf0, 0x04
 };
+
 static const u8 sha3_512_empty[SHA3_512_DIGEST_SIZE] = {
-	0xa6, 0x9f, 0x73, 0xcc, 0xa2, 0x3a, 0x9a, 0xc5, 0xc8, 0xb5, 0x67, 0xdc, 0x18, 0x5a, 0x75, 0x6e,
-	0x97, 0xc9, 0x82, 0x16, 0x4f, 0xe2, 0x58, 0x59, 0xe0, 0xd1, 0xdc, 0xc1, 0x47, 0x5c, 0x80, 0xa6,
-	0x15, 0xb2, 0x12, 0x3a, 0xf1, 0xf5, 0xf9, 0x4c, 0x11, 0xe3, 0xe9, 0x40, 0x2c, 0x3a, 0xc5, 0x58,
-	0xf5, 0x00, 0x19, 0x9d, 0x95, 0xb6, 0xd3, 0xe3, 0x01, 0x75, 0x85, 0x86, 0x28, 0x1d, 0xcd, 0x26
+	0xa6, 0x9f, 0x73, 0xcc, 0xa2, 0x3a, 0x9a, 0xc5,
+	0xc8, 0xb5, 0x67, 0xdc, 0x18, 0x5a, 0x75, 0x6e,
+	0x97, 0xc9, 0x82, 0x16, 0x4f, 0xe2, 0x58, 0x59,
+	0xe0, 0xd1, 0xdc, 0xc1, 0x47, 0x5c, 0x80, 0xa6,
+	0x15, 0xb2, 0x12, 0x3a, 0xf1, 0xf5, 0xf9, 0x4c,
+	0x11, 0xe3, 0xe9, 0x40, 0x2c, 0x3a, 0xc5, 0x58,
+	0xf5, 0x00, 0x19, 0x9d, 0x95, 0xb6, 0xd3, 0xe3,
+	0x01, 0x75, 0x85, 0x86, 0x28, 0x1d, 0xcd, 0x26
 };
 
 static const u8 *ma35_sha3_empty_digest(unsigned int digest_len)
@@ -111,12 +125,12 @@ static struct nu_sha_dev *ma35_sha_find_dev(struct nu_sha_ctx *tctx)
 
 static inline void ma35_write_reg(struct nu_sha_dev *sha_dd, u32 val, u32 reg)
 {
-	sha_dd->va_shm[reg/4] = val;
+	sha_dd->va_shm[reg / 4] = val;
 }
 
 static inline u32 ma35_read_reg(struct nu_sha_dev *sha_dd, u32 reg)
 {
-	return sha_dd->va_shm[reg/4];
+	return sha_dd->va_shm[reg / 4];
 }
 
 struct ma35_sha_tee_session {
@@ -140,7 +154,7 @@ struct ma35_sha_optee_state {
 static struct ma35_sha_optee_state sha_tee;
 
 static bool ma35_sha_tee_session_open(struct nu_sha_dev *dd,
-				       struct nu_sha_reqctx *ctx)
+				      struct nu_sha_reqctx *ctx)
 {
 	struct ma35_sha_tee_session *session;
 
@@ -181,7 +195,7 @@ static int ma35_sha_tee_close(struct nu_sha_dev *dd, u32 sid)
 			continue;
 		if (err < 0 || arg.ret) {
 			session->close_failed = true;
-			/* only a broken transport is fatal; a PTA error leaves other requests usable */
+			/* only a broken transport is fatal; a PTA error is not */
 			if (err < 0)
 				WRITE_ONCE(ma35_crypto_optee_faulted, true);
 			break;
@@ -194,7 +208,7 @@ static int ma35_sha_tee_close(struct nu_sha_dev *dd, u32 sid)
 }
 
 static int ma35_sha_tee_retire(struct nu_sha_dev *dd,
-				struct nu_sha_reqctx *ctx)
+			       struct nu_sha_reqctx *ctx)
 {
 	struct ma35_sha_tee_session *session, *tmp;
 	int err;
@@ -334,7 +348,7 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 			ctx->reg_ctl &= ~HMAC_CTL_DMACSCAD;
 	}
 
-	if ((ctx->op & HMAC_CTL_SHA3EN) && (ctx->bufcnt == 0)) {
+	if ((ctx->op & HMAC_CTL_SHA3EN) && ctx->bufcnt == 0) {
 		/* workaround for MA35D1 SHA3 in case of DMACNT is 0 */
 		ctx->reg_ctl |= HMAC_CTL_DMACSCAD;
 	}
@@ -375,7 +389,7 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 		param[0].u.value.a = C_CODE_SHA;
 
 		err = tee_client_invoke_func(dd->octx, &inv_arg, param);
-		if ((err < 0) || (inv_arg.ret != 0)) {
+		if (err < 0 || inv_arg.ret != 0) {
 			dev_err(dd->dev,
 				"SHA open failed: transport=%d PTA=%#x\n",
 				err, inv_arg.ret);
@@ -413,7 +427,7 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 		param[2].u.value.a = tctx->hmac_key_len;
 
 		err = tee_client_invoke_func(dd->octx, &inv_arg, param);
-		if ((err < 0) || (inv_arg.ret != 0)) {
+		if (err < 0 || inv_arg.ret != 0) {
 			dev_err(dd->dev,
 				"SHA start sid=%u: transport=%d PTA=%#x\n",
 				ctx->tsi_sid, err, inv_arg.ret);
@@ -447,7 +461,7 @@ static int ma35_sha_dma_run(struct nu_sha_dev *dd, int is_key_block)
 	param[1].u.memref.shm_offs = 0;
 
 	err = tee_client_invoke_func(dd->octx, &inv_arg, param);
-	if ((err < 0) || (inv_arg.ret != 0)) {
+	if (err < 0 || inv_arg.ret != 0) {
 		dev_err(dd->dev,
 			"SHA run sid=%u: transport=%d PTA=%#x\n",
 			ctx->tsi_sid, err, inv_arg.ret);
@@ -489,7 +503,7 @@ static void  ma35_sha_get_result(struct ahash_request *req)
 	}
 
 	/* Get the hash from the digest buffer */
-	for (i = 0; i < ctx->digest_len/4; i++)
+	for (i = 0; i < ctx->digest_len / 4; i++)
 		put_unaligned(ma35_read_reg(ctx->dd, HMAC_DGST(i)),
 			      (u32 *)(result + i * sizeof(u32)));
 }
@@ -544,13 +558,13 @@ static int ma35_sha_init(struct ahash_request *req)
 	ctx->op = 0;
 	if (strncmp(cra_name, "hmac", 4) == 0) {
 		ctx->op = HMAC_CTL_HMACEN;
-		if (strncmp(cra_name+5, "sha3-", 5) == 0) {
+		if (strncmp(cra_name + 5, "sha3-", 5) == 0) {
 			ctx->op |= HMAC_CTL_SHA3EN;
 			is_sha3 = true;
 		}
-		if (strncmp(cra_name+5, "sm3", 3) == 0)
+		if (strncmp(cra_name + 5, "sm3", 3) == 0)
 			ctx->op |= HMAC_CTL_SM3EN;
-		if (strncmp(cra_name+5, "md5", 3) == 0)
+		if (strncmp(cra_name + 5, "md5", 3) == 0)
 			ctx->op |= HMAC_CTL_MD5EN;
 	} else if (strncmp(cra_name, "sha3-", 5) == 0) {
 		is_sha3 = true;
@@ -580,28 +594,28 @@ static int ma35_sha_init(struct ahash_request *req)
 		break;
 	case SHA224_DIGEST_SIZE:
 		ctx->reg_ctl |= SHA_OPMODE_SHA224;
-		if (is_sha3 == true)
+		if (is_sha3)
 			ctx->block_size = SHA3_224_BLOCK_SIZE;
 		else
 			ctx->block_size = SHA224_BLOCK_SIZE;
 		break;
 	case SHA256_DIGEST_SIZE:
 		ctx->reg_ctl |= SHA_OPMODE_SHA256;
-		if (is_sha3 == true)
+		if (is_sha3)
 			ctx->block_size = SHA3_256_BLOCK_SIZE;
 		else
 			ctx->block_size = SHA256_BLOCK_SIZE;
 		break;
 	case SHA384_DIGEST_SIZE:
 		ctx->reg_ctl |= SHA_OPMODE_SHA384;
-		if (is_sha3 == true)
+		if (is_sha3)
 			ctx->block_size = SHA3_384_BLOCK_SIZE;
 		else
 			ctx->block_size = SHA384_BLOCK_SIZE;
 		break;
 	case SHA512_DIGEST_SIZE:
 		ctx->reg_ctl |= SHA_OPMODE_SHA512;
-		if (is_sha3 == true)
+		if (is_sha3)
 			ctx->block_size = SHA3_512_BLOCK_SIZE;
 		else
 			ctx->block_size = SHA512_BLOCK_SIZE;
@@ -629,7 +643,7 @@ static int ma35_sha_init(struct ahash_request *req)
 
 	/* is HMAC, check key length */
 	if (((tctx->hmac_key_len + ctx->block_size - 1) > HMAC_KEY_BUFF_SIZE) ||
-	    (tctx->hmac_key_len == 0)) {
+	    tctx->hmac_key_len == 0) {
 		pr_err("HMAC key length %d is not supported!\n", tctx->hmac_key_len);
 		kfree(ctx->buffer);
 		ctx->buffer = NULL;
@@ -645,7 +659,6 @@ static void ma35_sha_sg_to_dma_buffer(struct ahash_request *req, struct nu_sha_r
 	int copy_len;
 
 	while (ctx->sg && (ctx->req_len > 0) && (ctx->bufcnt < ctx->dma_max_size)) {
-
 		copy_len = min((int)ctx->sg->length - ctx->sg_off, ctx->req_len);
 		if (ctx->dma_max_size - ctx->bufcnt < copy_len)
 			copy_len = ctx->dma_max_size - ctx->bufcnt;
@@ -675,7 +688,7 @@ static int ma35_sha_update_start(struct nu_sha_dev *dd)
 		ma35_sha_finish_req(ctx, -EIO);
 		return -EIO;
 	}
-	if ((ctx->req_len > 0) &&  (ctx->bufcnt < ctx->dma_max_size))
+	if (ctx->req_len > 0 &&  ctx->bufcnt < ctx->dma_max_size)
 		ma35_sha_sg_to_dma_buffer(dd->req, ctx);
 
 	if ((ctx->op & HMAC_CTL_SHA3EN) && !(ctx->op & HMAC_CTL_HMACEN) &&
@@ -691,7 +704,7 @@ static int ma35_sha_update_start(struct nu_sha_dev *dd)
 
 	if (ctx->flags & SHA_FLAGS_KEY_BLK) {
 		if ((ctx->flags & (SHA_FLAGS_FINUP | SHA_FLAGS_FINAL)) &&
-		    (ctx->bufcnt == 0) && (dd->req->nbytes == 0)) {
+		    ctx->bufcnt == 0 && dd->req->nbytes == 0) {
 			err = ma35_hmac_empty_msg(dd->req, crypto_tfm_ctx(dd->req->base.tfm));
 			if (!err)
 				ctx->flags |= SHA_FLAGS_EMPTY_HMAC | SHA_FLAGS_FINAL_DMA;
@@ -709,7 +722,7 @@ static int ma35_sha_update_start(struct nu_sha_dev *dd)
 		 */
 
 		/* Check if it's the final DMA */
-		if ((ctx->flags & (SHA_FLAGS_FINUP | SHA_FLAGS_FINAL)) && (ctx->req_len == 0))
+		if ((ctx->flags & (SHA_FLAGS_FINUP | SHA_FLAGS_FINAL)) && ctx->req_len == 0)
 			ctx->flags |= SHA_FLAGS_FINAL_DMA;
 
 		err = ma35_sha_dma_run(dd, 0);
@@ -844,7 +857,7 @@ static int ma35_sha_finup(struct ahash_request *req)
 
 	err1 = ma35_sha_update(req);
 	if (err1 == -EINPROGRESS || (err1 == -EBUSY &&
-	    (ahash_request_flags(req) & CRYPTO_TFM_REQ_MAY_BACKLOG)))
+				     (ahash_request_flags(req) & CRYPTO_TFM_REQ_MAY_BACKLOG)))
 		return err1;
 
 	/*
@@ -1355,7 +1368,7 @@ static int  ma35_optee_sha_init(struct nu_sha_dev *dd)
 	sess_arg.num_params = 0;
 
 	err = tee_client_open_session(dd->octx, &sess_arg, NULL);
-	if ((err < 0) || (sess_arg.ret != 0)) {
+	if (err < 0 || sess_arg.ret != 0) {
 		pr_err("%s open session failed, err: %x\n", __func__, sess_arg.ret);
 		err = err < 0 ? err : -EIO;
 		goto out_ctx;
@@ -1432,7 +1445,6 @@ int ma35_sha_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	if (err)
 		return err;
 
-
 	INIT_LIST_HEAD(&sha_dd->list);
 	INIT_LIST_HEAD(&sha_tee.sessions);
 	spin_lock_init(&sha_dd->lock);
@@ -1440,7 +1452,7 @@ int ma35_sha_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	INIT_WORK(&sha_tee.queue_work, ma35_sha_tee_queue_work);
 	INIT_WORK(&sha_tee.done_work, ma35_sha_tee_done_work);
 	sha_tee.wq = alloc_ordered_workqueue("ma35-sha-optee",
-						 WQ_MEM_RECLAIM);
+					     WQ_MEM_RECLAIM);
 	if (!sha_tee.wq) {
 		err = -ENOMEM;
 		goto err_optee;

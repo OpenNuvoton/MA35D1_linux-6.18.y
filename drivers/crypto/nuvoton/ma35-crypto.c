@@ -86,10 +86,8 @@ static int ma35_crypto_probe(struct platform_device *pdev)
 	 *  Get irq number and install irq handler
 	 */
 	irq = platform_get_irq(pdev, 0);
-	if (irq <= 0) {
-		dev_err(dev, "Failed to get ma35 crypto irq!\n");
+	if (irq <= 0)
 		return -ENODEV;
-	}
 	err = devm_request_irq(dev, irq, ma35_crypto_irq, IRQF_SHARED,
 			       "ma35-crypto", crypto_dev);
 	if (err) {
@@ -155,13 +153,11 @@ static const struct of_device_id ma35_crypto_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, ma35_crypto_of_match);
 
-
 static struct platform_driver ma35_crypto_driver = {
 	.probe  = ma35_crypto_probe,
 	.remove = ma35_crypto_remove,
 	.driver = {
 		.name = "ma35-crypto",
-		.owner = THIS_MODULE,
 		.of_match_table = ma35_crypto_of_match,
 	},
 };

@@ -369,7 +369,7 @@ struct nu_aes_dev {
 
 	nu_aes_fn_t		resume;
 
-	spinlock_t		lock;
+	spinlock_t		lock;	/* protects request queue and busy flags */
 	struct crypto_queue	queue;
 
 	struct tasklet_struct	done_task;
@@ -443,7 +443,7 @@ struct nu_sha_dev {
 	void __iomem		*reg_base;
 	u32			flags;
 
-	spinlock_t		lock;
+	spinlock_t		lock;	/* protects request queue and busy flags */
 
 	struct crypto_queue	queue;
 	struct ahash_request	*req;
@@ -459,7 +459,6 @@ struct nu_sha_dev {
 	struct tee_shm		*shm_pool;
 	u32			*va_shm;
 };
-
 
 /*-------------------------------------------------------------------------*/
 /*   ECC								   */
@@ -501,15 +500,15 @@ enum {
 
 struct nu_ecc_curve {
 	int	   curve_id;
-	int	   Echar;
-	u8	   Ea[NU_ECC_MAX_LEN];
-	u8	   Eb[NU_ECC_MAX_LEN];
-	u8	   Px[NU_ECC_MAX_LEN];
-	u8	   Py[NU_ECC_MAX_LEN];
-	int	   Epl;
-	u8	   Pp[NU_ECC_MAX_LEN];
-	int	   Eol;
-	u8	   Eorder[72];
+	int	   echar;
+	u8	   ea[NU_ECC_MAX_LEN];
+	u8	   eb[NU_ECC_MAX_LEN];
+	u8	   px[NU_ECC_MAX_LEN];
+	u8	   py[NU_ECC_MAX_LEN];
+	int	   epl;
+	u8	   pp[NU_ECC_MAX_LEN];
+	int	   eol;
+	u8	   eorder[72];
 	int	   key_len;
 	int	   irreducible_k1;
 	int	   irreducible_k2;
@@ -531,7 +530,7 @@ struct nu_ecc_dev {
 	struct device	     *dev;
 	struct nu_crypto_dev *nu_cdev;
 	void __iomem	     *reg_base;
-	spinlock_t	     lock;
+	spinlock_t	     lock;	/* protects request queue and busy flags */
 	struct mutex	     io_lock;	/* serializes users of va_shm and the TEE session */
 
 	/*
@@ -548,26 +547,26 @@ struct nu_ecc_dev {
 /*-------------------------------------------------------------------------*/
 
 #define	NU_RSA_MAX_BIT_LEN	(4096)
-#define	NU_RSA_MAX_BYTE_LEN	(NU_RSA_MAX_BIT_LEN/8)
-#define	NU_RSA_MAX_WORD_LEN	(NU_RSA_MAX_BIT_LEN/32)
+#define	NU_RSA_MAX_BYTE_LEN	(NU_RSA_MAX_BIT_LEN / 8)
+#define	NU_RSA_MAX_WORD_LEN	(NU_RSA_MAX_BIT_LEN / 32)
 
 #define	RSA_REG_RAM_SIZE	(NU_RSA_MAX_BYTE_LEN)
 #define	RSA_BUFF_SIZE		(RSA_REG_RAM_SIZE * 13)
 
 #define	M_OFF			(0)
 #define	N_OFF			(RSA_REG_RAM_SIZE)
-#define	E_OFF			(RSA_REG_RAM_SIZE*2)
-#define	D_OFF			(RSA_REG_RAM_SIZE*2)
-#define	P_OFF			(RSA_REG_RAM_SIZE*3)
-#define	Q_OFF			(RSA_REG_RAM_SIZE*4)
-#define	MADR0_OFF		(RSA_REG_RAM_SIZE*5)
-#define	MADR1_OFF		(RSA_REG_RAM_SIZE*6)
-#define	MADR2_OFF		(RSA_REG_RAM_SIZE*7)
-#define	MADR3_OFF		(RSA_REG_RAM_SIZE*8)
-#define	MADR4_OFF		(RSA_REG_RAM_SIZE*9)
-#define	MADR5_OFF		(RSA_REG_RAM_SIZE*10)
-#define	MADR6_OFF		(RSA_REG_RAM_SIZE*11)
-#define	ANS_OFF			(RSA_REG_RAM_SIZE*12)
+#define	E_OFF			(RSA_REG_RAM_SIZE * 2)
+#define	D_OFF			(RSA_REG_RAM_SIZE * 2)
+#define	P_OFF			(RSA_REG_RAM_SIZE * 3)
+#define	Q_OFF			(RSA_REG_RAM_SIZE * 4)
+#define	MADR0_OFF		(RSA_REG_RAM_SIZE * 5)
+#define	MADR1_OFF		(RSA_REG_RAM_SIZE * 6)
+#define	MADR2_OFF		(RSA_REG_RAM_SIZE * 7)
+#define	MADR3_OFF		(RSA_REG_RAM_SIZE * 8)
+#define	MADR4_OFF		(RSA_REG_RAM_SIZE * 9)
+#define	MADR5_OFF		(RSA_REG_RAM_SIZE * 10)
+#define	MADR6_OFF		(RSA_REG_RAM_SIZE * 11)
+#define	ANS_OFF			(RSA_REG_RAM_SIZE * 12)
 
 struct nu_rsa_ctx {
 	struct nu_rsa_dev  *dd;
@@ -632,14 +631,14 @@ struct nu_crypto_dev {
 struct ecc_args_t {
 	int	curve;
 	int	keylen;
-					/* Key Store key is OTP	key if bit7 is 1, otherwise is SRAM key. */
-					/* For example,	0x84 is	OTP key	4, while 0x11 is SRAM key 17 */
+	/* Key Store key is OTP key if bit7 is 1, otherwise SRAM key. */
+	/* For example, 0x84 is OTP key 4, while 0x11 is SRAM key 17 */
 	int	knum_d;			/* Key Store number of private key; -1 means unused */
 	int	knum_x;			/* Key Store number of public key X; -1	means unused */
 	int	knum_y;			/* Key Store number of public key Y; -1	means unused */
 	u8	d[ECC_KMAXL];		/* private key (not used if select Key Store key) */
-	u8	Qx[ECC_KMAXL];		/* public key X	(not used if select Key	Store key) */
-	u8	Qy[ECC_KMAXL];		/* public key Y	(not used if select Key	Store key) */
+	u8	qx[ECC_KMAXL];		/* public key X	(not used if select Key	Store key) */
+	u8	qy[ECC_KMAXL];		/* public key Y	(not used if select Key	Store key) */
 	u8	sha_dgst[ECC_KMAXL];	/* sha digest of the message(or	image) to be verified */
 	u8	k[ECC_KMAXL];		/* used	for signature generation */
 	u8	R[ECC_KMAXL];		/* ECDSA signature R */

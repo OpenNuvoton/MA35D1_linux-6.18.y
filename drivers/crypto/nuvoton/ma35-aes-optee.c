@@ -140,12 +140,12 @@ static struct nu_aes_dev *ma35_aes_find_dev(struct nu_aes_base_ctx *ctx)
 
 static inline void ma35_write_reg(struct nu_aes_dev *aes_dd, u32 val, u32 reg)
 {
-	aes_dd->va_shm[reg/4] = val;
+	aes_dd->va_shm[reg / 4] = val;
 }
 
 static inline u32 ma35_read_reg(struct nu_aes_dev *aes_dd, u32 reg)
 {
-	return aes_dd->va_shm[reg/4];
+	return aes_dd->va_shm[reg / 4];
 }
 
 static int ma35_aes_sg_to_buffer(struct nu_aes_dev *dd, u8 *bptr, int max_cnt)
@@ -176,7 +176,7 @@ static int ma35_aes_buffer_to_sg(struct nu_aes_dev *dd, u8 *bptr, int max_cnt)
 {
 	int copy_len, out_cnt = 0;
 
-	while ((max_cnt > 0) && (dd->out_sg != NULL)) {
+	while ((max_cnt > 0) && (dd->out_sg)) {
 		copy_len = min((int)dd->out_sg->length - dd->out_sg_off, max_cnt);
 		memcpy((u8 *)sg_virt(dd->out_sg) + dd->out_sg_off, bptr + out_cnt, copy_len);
 
@@ -305,7 +305,7 @@ static int ma35_aes_dma_run(struct nu_aes_dev *dd, u32 cascade)
 		dd->dma_len += ma35_aes_sg_to_buffer(dd, dd->inbuf + dd->dma_len,
 						     AES_BUFF_SIZE - dd->dma_len);
 
-	if (!dd->in_sg || (dd->req_len == 0)) {
+	if (!dd->in_sg || dd->req_len == 0) {
 		dd->resume = ma35_aes_complete;	/* no more data */
 		dma_ctl = cascade | AES_CTL_DMALAST;
 	} else {
@@ -403,7 +403,7 @@ static int ma35_aes_dma_start(struct nu_aes_dev *dd, int err)
 	if ((ctx->mode & AES_CTL_OPMODE_MASK) == AES_MODE_ECB)
 		iv = NULL;
 
-	if ((req->cryptlen == 0) || (req->src == NULL) || (req->dst == NULL))
+	if (req->cryptlen == 0 || !req->src || !req->dst)
 		return ma35_aes_complete(dd, 0);  /* no data */
 
 	dd->req_len = req->cryptlen;
@@ -560,7 +560,7 @@ static int ma35_aes_setkey(struct crypto_skcipher *tfm, const u8 *key, unsigned 
 		 *         1: Key Store OTP
 		 *  key[2] select the Key Store key number
 		 */
-		if ((key[0] > 2) || (key[1] > 1) || (key[2] > 31))
+		if (key[0] > 2 || key[1] > 1 || key[2] > 31)
 			return -EINVAL;
 		ctx->keysz_sel = (key[0] << AES_CTL_KEYSZ_OFFSET);
 		break;
@@ -587,7 +587,7 @@ static int ma35_aes_optee_init(struct nu_aes_dev *dd)
 {
 	int err;
 
-	if (dd->octx != NULL)
+	if (dd->octx)
 		return 0;
 
 	err = ma35_crypto_optee_init(dd->nu_cdev);
@@ -706,7 +706,7 @@ static int ma35_sm4_ctr_encrypt(struct skcipher_request *req)
 
 static int ma35_sm4_ctr_decrypt(struct skcipher_request *req)
 {
-	return ma35_aes_crypt(req, AES_CTL_SM4EN|AES_MODE_CTR);
+	return ma35_aes_crypt(req, AES_CTL_SM4EN | AES_MODE_CTR);
 }
 #endif
 
@@ -723,7 +723,7 @@ static int ma35_aes_cra_init(struct crypto_tfm *tfm)
 	if (!aes_dd)
 		return -ENODEV;
 	crypto_skcipher_set_reqsize(__crypto_skcipher_cast(tfm),
-				   sizeof(struct ma35_aes_reqctx));
+				    sizeof(struct ma35_aes_reqctx));
 
 	return 0;
 }
@@ -980,7 +980,6 @@ static int ma35_aes_gcm_dma_start(struct nu_aes_dev *dd, int err)
 	return ma35_aes_dma_run(dd, 0);
 }
 
-
 /*
  *  The payload is processed in cascaded DMAs, but J0/B0 and the whole AAD
  *  must go in the first DMA together with the first payload block.
@@ -1063,7 +1062,7 @@ static int ma35_aes_gcm_setkey(struct crypto_aead *tfm, const u8 *key, unsigned 
 		 *         1: Key Store OTP
 		 *  key[2] select the Key Store key number
 		 */
-		if ((key[0] > 2) || (key[1] > 1) || (key[2] > 31))
+		if (key[0] > 2 || key[1] > 1 || key[2] > 31)
 			return -EINVAL;
 		ctx->keysz_sel = (key[0] << AES_CTL_KEYSZ_OFFSET);
 		break;
@@ -1187,10 +1186,10 @@ static int ma35_aes_ccm_dma_start(struct nu_aes_dev *dd, int err)
 	b[0] |= ((ctx->authsize - 2) / 2) << 3;
 	b[0] |= q - 1;
 
-	memcpy(b+1, req->iv+1, nlen);
+	memcpy(b + 1, req->iv + 1, nlen);
 
 	for (i = 0, len_left = plen; i < q; i++, len_left >>= 8)
-		b[15-i] = (u8)(len_left & 0xFF);
+		b[15 - i] = (u8)(len_left & 0xFF);
 	b += 16;
 
 	/*-----------------------------------------------------------------*/
@@ -1243,11 +1242,11 @@ static int ma35_aes_ccm_dma_start(struct nu_aes_dev *dd, int err)
 	memset(ctr, 0, 16);
 	q = 15 - nlen;     /* n + q = 15; n is length of nounce, i.e. Nlen */
 	ctr[0] = (q - 1) & 0x7;
-	memcpy(ctr+1, req->iv+1, nlen);
+	memcpy(ctr + 1, req->iv + 1, nlen);
 
 	/* program AES IV registers */
 	for (i = 0; i < 4; i++)
-		ma35_write_reg(dd, *((u32 *)&ctr[i*4]), AES_IV(i));
+		ma35_write_reg(dd, *((u32 *)&ctr[i * 4]), AES_IV(i));
 
 	if (ctx->keylen == AES_KS_KEYLEN) {
 		/* configure AES Key from Key Store */
@@ -1257,7 +1256,7 @@ static int ma35_aes_ccm_dma_start(struct nu_aes_dev *dd, int err)
 	} else {
 		/* program AES key */
 		ma35_write_reg(dd, 0, AES_KSCTL);
-		for (i = 0; i < ctx->keylen/4; i++)
+		for (i = 0; i < ctx->keylen / 4; i++)
 			ma35_write_reg(dd, ctx->aes_key[i], AES_KEY(i));
 	}
 
@@ -1277,7 +1276,6 @@ static int ma35_aes_ccm_dma_start(struct nu_aes_dev *dd, int err)
 
 	return ma35_aes_dma_run(dd, 0);
 }
-
 
 static int ma35_aes_ccm_crypt(struct aead_request *req, u32 mode)
 {
@@ -1469,7 +1467,7 @@ int ma35_aes_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	sess_arg.num_params = 0;
 
 	err = tee_client_open_session(aes_dd->octx, &sess_arg, NULL);
-	if ((err < 0) || (sess_arg.ret != 0)) {
+	if (err < 0 || sess_arg.ret != 0) {
 		pr_err("%s open session failed, err: %x\n", __func__, sess_arg.ret);
 		err = err < 0 ? err : -EIO;
 		goto err_context;
@@ -1484,7 +1482,7 @@ int ma35_aes_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 	INIT_WORK(&aes_tee.queue_work, ma35_aes_tee_queue_work);
 	INIT_WORK(&aes_tee.done_work, ma35_aes_tee_done_work);
 	aes_tee.wq = alloc_ordered_workqueue("ma35-aes-optee",
-						 WQ_MEM_RECLAIM);
+					     WQ_MEM_RECLAIM);
 	if (!aes_tee.wq) {
 		err = -ENOMEM;
 		goto err_session;
@@ -1518,9 +1516,9 @@ int ma35_aes_optee_probe(struct device *dev, struct nu_crypto_dev *crypto_dev)
 err_algs:
 	if (gcm_ccm_registered) {
 		crypto_unregister_aeads(ma35_aes_gcm_alg,
-					 ARRAY_SIZE(ma35_aes_gcm_alg));
+					ARRAY_SIZE(ma35_aes_gcm_alg));
 		crypto_unregister_aeads(ma35_aes_ccm_alg,
-					 ARRAY_SIZE(ma35_aes_ccm_alg));
+					ARRAY_SIZE(ma35_aes_ccm_alg));
 	}
 	while (i--)
 		crypto_unregister_skcipher(&ma35_aes_algs[i]);
