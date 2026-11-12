@@ -112,7 +112,7 @@ struct ma35d1_adc_dma {
 
 struct ma35d1_adc_scan {
 	u16 channels[MA35D1_EADC_MAX_CHANNELS];
-	s64 timestamp __aligned(8);
+	aligned_s64 timestamp;
 };
 
 struct ma35d1_adc {
@@ -122,6 +122,7 @@ struct ma35d1_adc {
 	struct clk *clk;
 	int irq;
 	struct completion completion;
+	/* serializes direct conversions on the single shared EADC */
 	struct mutex lock;
 	struct iio_trigger *trig;
 	struct ma35d1_adc_scan scan;
@@ -659,9 +660,8 @@ static int ma35d1_adc_read_raw(struct iio_dev *indio_dev,
 
 	writel(BIT(0), adc->regs + MA35D1_EADC_SWTRG);
 
-	timeout = wait_for_completion_interruptible_timeout(
-			&adc->completion,
-			msecs_to_jiffies(MA35D1_EADC_TIMEOUT_MS));
+	timeout = msecs_to_jiffies(MA35D1_EADC_TIMEOUT_MS);
+	timeout = wait_for_completion_interruptible_timeout(&adc->completion, timeout);
 
 	/* Always return the direct-conversion interrupt path to idle. */
 	ctl = readl(adc->regs + MA35D1_EADC_CTL);
@@ -807,7 +807,7 @@ static int ma35d1_adc_setup_trigger(struct device *dev,
 	int ret;
 
 	adc->trig = devm_iio_trigger_alloc(dev, "%s-trigger",
-					  dev_name(dev));
+					   dev_name(dev));
 	if (!adc->trig)
 		return -ENOMEM;
 

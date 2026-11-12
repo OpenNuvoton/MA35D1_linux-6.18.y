@@ -34,45 +34,45 @@
 /* ADC Control  */
 #define REG_ADC_CTL             (0x000)
 
-#define ADC_CTL_ADEN            (1 << 0)
-#define ADC_CTL_MST             (1 << 8)
-#define ADC_CTL_PEDEEN          (1 << 9)
-#define ADC_CTL_WKTEN           (1 << 11)
-#define ADC_CTL_WMSWCH          (1 << 16)
+#define ADC_CTL_ADEN            BIT(0)
+#define ADC_CTL_MST             BIT(8)
+#define ADC_CTL_PEDEEN          BIT(9)
+#define ADC_CTL_WKTEN           BIT(11)
+#define ADC_CTL_WMSWCH          BIT(16)
 
 /* ADC Configure  */
 #define REG_ADC_CONF            (0x004)
 
-#define ADC_CONF_TEN            (1 << 0)
-#define ADC_CONF_ZEN            (1 << 1)
-#define ADC_CONF_NACEN          (1 << 2)
+#define ADC_CONF_TEN            BIT(0)
+#define ADC_CONF_ZEN            BIT(1)
+#define ADC_CONF_NACEN          BIT(2)
 #define ADC_CONF_REFSEL_POS     (6)
 #define ADC_CONF_REFSEL_MSK     (3 << 6)
 #define ADC_CONF_REFSEL_AVDD    (3 << 6)
 #define ADC_CONF_CHSEL_POS      (12)
 #define ADC_CONF_CHSEL_MSK      (7 << 12)
-#define ADC_CONF_TMAVDIS        (1 << 20)
-#define ADC_CONF_ZMAVDIS        (1 << 21)
-#define ADC_CONF_SPEED          (1 << 22)
+#define ADC_CONF_TMAVDIS        BIT(20)
+#define ADC_CONF_ZMAVDIS        BIT(21)
+#define ADC_CONF_SPEED          BIT(22)
 
 /* ADC Interrupt Enable Register */
 #define REG_ADC_IER             (0x008)
 
-#define ADC_IER_MIEN            (1 << 0)
-#define ADC_IER_PEDEIEN         (1 << 2)
-#define ADC_IER_WKTIEN          (1 << 3)
-#define ADC_IER_PEUEIEN         (1 << 6)
+#define ADC_IER_MIEN            BIT(0)
+#define ADC_IER_PEDEIEN         BIT(2)
+#define ADC_IER_WKTIEN          BIT(3)
+#define ADC_IER_PEUEIEN         BIT(6)
 
 /* ADC Interrupt Status Register */
 #define REG_ADC_ISR             (0x00C)
 
-#define ADC_ISR_MF              (1 << 0)
-#define ADC_ISR_PEDEF           (1 << 2)
-#define ADC_ISR_PEUEF           (1 << 4)
-#define ADC_ISR_TF              (1 << 8)
-#define ADC_ISR_ZF              (1 << 9)
-#define ADC_ISR_NACF            (1 << 10)
-#define ADC_ISR_INTTC           (1 << 17)
+#define ADC_ISR_MF              BIT(0)
+#define ADC_ISR_PEDEF           BIT(2)
+#define ADC_ISR_PEUEF           BIT(4)
+#define ADC_ISR_TF              BIT(8)
+#define ADC_ISR_ZF              BIT(9)
+#define ADC_ISR_NACF            BIT(10)
+#define ADC_ISR_INTTC           BIT(17)
 
 /* ADC Normal Conversion Data */
 #define REG_ADC_DATA            (0x028)
@@ -84,7 +84,6 @@
 
 #define ADC_CH_NUM              8
 
-
 /* device related private data */
 struct ma35_iio_priv {
 	void __iomem		*base;
@@ -93,10 +92,11 @@ struct ma35_iio_priv {
 	struct clk		*adc_clk;
 	int		irq;
 	u32		vref_mv;
-	
+
 	/* data buffer needs space for channel data and timestamp */
 	struct {
 		u16 chan[ADC_CH_NUM];
+
 		u64 ts __aligned(8);
 	} scan;
 };
@@ -147,32 +147,31 @@ static int ma35_read(struct iio_dev *indio_dev, int channel)
 	__raw_writel((__raw_readl(priv->base + REG_ADC_CTL) &
 		~ADC_CTL_PEDEEN) | ADC_CTL_MST, priv->base + REG_ADC_CTL);
 
-	timeout = wait_for_completion_interruptible_timeout(&priv->conv_completion, ADC_CONV_TIMEOUT);
-	if (timeout)
+	timeout = wait_for_completion_interruptible_timeout(&priv->conv_completion,
+							    ADC_CONV_TIMEOUT);
+	if (timeout > 0)
 		return __raw_readl(priv->base + REG_ADC_DATA);
-	else
-		return -ENODATA;
+
+	return -ENODATA;
 }
 
 static int ma35_adc_read_raw(struct iio_dev *indio_dev,
-				struct iio_chan_spec const *chan, int *val,
+			     struct iio_chan_spec const *chan, int *val,
 				int *val2, long mask)
 {
 	struct ma35_iio_priv *priv = iio_priv(indio_dev);
-	int raw_val, ret;
+	int raw_val;
 
 	if (mask == IIO_CHAN_INFO_RAW) {
-		ret = iio_device_claim_direct(indio_dev);
-		if (ret < 0)
+		if (!iio_device_claim_direct(indio_dev))
 			return -EBUSY;
 
 		raw_val = ma35_read(indio_dev, chan->channel);
 
 		iio_device_release_direct(indio_dev);
-		
-		if (raw_val < 0) {
+
+		if (raw_val < 0)
 			return -ENODATA;
-		}
 
 		*val = raw_val;
 		return IIO_VAL_INT;
@@ -193,32 +192,33 @@ static irqreturn_t ma35_iio_buffer_trigger_handler(int irq, void *p)
 	struct iio_dev *indio_dev = pf->indio_dev;
 	struct ma35_iio_priv *priv = iio_priv(indio_dev);
 	int scan_index, val = 0, i = 0;
-	unsigned long timeout;
+	long timeout;
 
-	for_each_set_bit(scan_index, indio_dev->active_scan_mask, indio_dev->masklength) {
+	for_each_set_bit(scan_index, indio_dev->active_scan_mask,
+			 iio_get_masklength(indio_dev)) {
 		const struct iio_chan_spec *scan_chan = &indio_dev->channels[scan_index];
-	
+
 		reinit_completion(&priv->menu_completion);
-			
+
 		val = ma35_read(indio_dev, scan_chan->channel);
 		if (val == -ENODATA) {
 			dev_err(&indio_dev->dev, "failed to get conversion data\n");
 			return IRQ_NONE;
 		}
-	
+
 		priv->scan.chan[i++] = val;
-	
-		timeout = wait_for_completion_interruptible_timeout(
-			&priv->menu_completion, ADC_MENU_TIMEOUT);
+
+		timeout = wait_for_completion_interruptible_timeout(&priv->menu_completion,
+								    ADC_MENU_TIMEOUT);
 		if (timeout <= 0) {
 			dev_err(&indio_dev->dev, "failed to wait for mf completion\n");
 			return IRQ_NONE;
 		}
 	}
-	
-	iio_push_to_buffers_with_timestamp(indio_dev, &priv->scan, 
-		iio_get_time_ns(indio_dev));
-	
+
+	iio_push_to_buffers_with_timestamp(indio_dev, &priv->scan,
+					   iio_get_time_ns(indio_dev));
+
 	iio_trigger_notify_done(indio_dev->trig);
 
 	return IRQ_HANDLED;
@@ -251,7 +251,7 @@ static int ma35_adc_probe(struct platform_device *pdev)
 	if (irq < 0)
 		return irq;
 	priv->irq = irq;
-	
+
 	priv->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(priv->base))
 		return PTR_ERR(priv->base);
@@ -278,13 +278,11 @@ static int ma35_adc_probe(struct platform_device *pdev)
 		goto err_disable_clk;
 	}
 
-	if (of_property_read_u32(np, "nuvoton,min-clock-frequency", &min_clock_freq)) {
+	if (of_property_read_u32(np, "nuvoton,min-clock-frequency", &min_clock_freq))
 		dev_warn(&pdev->dev, "Missing min-clock-frequency\n");
-	}
 
-	if (of_property_read_u32(np, "nuvoton,max-clock-frequency", &max_clock_freq)) {
+	if (of_property_read_u32(np, "nuvoton,max-clock-frequency", &max_clock_freq))
 		dev_warn(&pdev->dev, "Missing max-clock-frequency\n");
-	}
 
 	if (of_property_read_u32(np, "nuvoton,adc-vref", &vref)) {
 		dev_err(&pdev->dev, "Missing adc-vref property in the DT.\n");
@@ -300,7 +298,7 @@ static int ma35_adc_probe(struct platform_device *pdev)
 	else
 		__raw_writel(__raw_readl(priv->base + REG_ADC_CONF) &
 					~ADC_CONF_SPEED, priv->base + REG_ADC_CONF);
-	
+
 	/* Clear all interrupt flags */
 	__raw_writel(0, priv->base + REG_ADC_IER);
 
@@ -308,7 +306,7 @@ static int ma35_adc_probe(struct platform_device *pdev)
 	__raw_writel(ADC_CTL_ADEN, priv->base + REG_ADC_CTL);
 
 	ret = devm_request_irq(&pdev->dev, priv->irq, ma35_iio_irq_handler,
-				0, dev_name(&pdev->dev), indio_dev);
+			       0, dev_name(&pdev->dev), indio_dev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Failed to request irq\n");
 		goto err_power_down;
@@ -325,12 +323,12 @@ static int ma35_adc_probe(struct platform_device *pdev)
 	/* 4-wire: mask = 0xF */
 	/* 5-wire: mask = 0x7 */
 	mask =  0xFF;
-	
+
 	/* timestamp channel (+1) */
 	indio_dev->num_channels = bitmap_weight(&mask, ADC_CH_NUM) + 1;
 
 	chan_array = devm_kzalloc(&pdev->dev,
-					((indio_dev->num_channels + 1) *
+				  ((indio_dev->num_channels + 1) *
 					sizeof(struct iio_chan_spec)),
 					GFP_KERNEL);
 	if (!chan_array) {
@@ -364,20 +362,21 @@ static int ma35_adc_probe(struct platform_device *pdev)
 
 	indio_dev->channels = chan_array;
 
-	ret = devm_iio_triggered_buffer_setup(&indio_dev->dev, indio_dev, 
-				&iio_pollfunc_store_time, ma35_iio_buffer_trigger_handler, NULL);
+	ret = devm_iio_triggered_buffer_setup(&indio_dev->dev, indio_dev,
+					      &iio_pollfunc_store_time,
+					      ma35_iio_buffer_trigger_handler, NULL);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Failed to setup iio triggered buffer\n");
 		goto err_power_down;
 	}
-	
+
 	ret = iio_device_register(indio_dev);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Failed to register iio device\n");
 		/* Power down the ADC */
 		__raw_writel(__raw_readl(priv->base + REG_ADC_CTL) & ~ADC_CTL_ADEN,
-			priv->base + REG_ADC_CTL);
-		
+			     priv->base + REG_ADC_CTL);
+
 		goto err_disable_clk;
 	}
 
@@ -385,7 +384,7 @@ static int ma35_adc_probe(struct platform_device *pdev)
 
 err_power_down:
 	__raw_writel(__raw_readl(priv->base + REG_ADC_CTL) & ~ADC_CTL_ADEN,
-			priv->base + REG_ADC_CTL);
+		     priv->base + REG_ADC_CTL);
 err_disable_clk:
 	clk_disable_unprepare(priv->adc_clk);
 	return ret;
@@ -400,10 +399,9 @@ static void ma35_adc_remove(struct platform_device *pdev)
 
 	/* Power down the ADC */
 	__raw_writel(__raw_readl(priv->base + REG_ADC_CTL) & ~ADC_CTL_ADEN,
-		priv->base + REG_ADC_CTL);
+		     priv->base + REG_ADC_CTL);
 
 	clk_disable_unprepare(priv->adc_clk);
-
 }
 
 static int ma35_adc_suspend(struct device *dev)
@@ -416,7 +414,7 @@ static int ma35_adc_suspend(struct device *dev)
 
 	/* Power down the ADC */
 	__raw_writel(__raw_readl(priv->base + REG_ADC_CTL) & ~ADC_CTL_ADEN,
-		priv->base + REG_ADC_CTL);
+		     priv->base + REG_ADC_CTL);
 
 	clk_disable_unprepare(priv->adc_clk);
 
@@ -435,7 +433,7 @@ static int ma35_adc_resume(struct device *dev)
 
 	/* Power up the ADC */
 	__raw_writel(__raw_readl(priv->base + REG_ADC_CTL) | ADC_CTL_ADEN,
-		priv->base + REG_ADC_CTL);
+		     priv->base + REG_ADC_CTL);
 
 	/* enable irq */
 	enable_irq(priv->irq);
@@ -444,8 +442,7 @@ static int ma35_adc_resume(struct device *dev)
 }
 
 static const struct dev_pm_ops ma35_adc_pm_ops = {
-    SET_SYSTEM_SLEEP_PM_OPS(ma35_adc_suspend,
-                            ma35_adc_resume)
+	SET_SYSTEM_SLEEP_PM_OPS(ma35_adc_suspend, ma35_adc_resume)
 };
 
 static const struct of_device_id ma35_adc_match[] = {
