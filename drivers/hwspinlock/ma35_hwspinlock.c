@@ -34,7 +34,7 @@ struct nvt_hwsem {
 	struct hwspinlock_device bank;
 };
 
-static void hwsem_UnLockReg(struct regmap *regmap)
+static void hwsem_unlock_reg(struct regmap *regmap)
 {
 	int ret;
 
@@ -47,7 +47,7 @@ static void hwsem_UnLockReg(struct regmap *regmap)
 	} while (ret == 0);
 }
 
-static void hwsem_LockReg(struct regmap *regmap)
+static void hwsem_lock_reg(struct regmap *regmap)
 {
 	/* Lock hwsem registers */
 	regmap_write(regmap, REG_SYS_RLKTZNS, 0x0);
@@ -55,7 +55,7 @@ static void hwsem_LockReg(struct regmap *regmap)
 
 static int nvt_hwsem_trylock(struct hwspinlock *lock)
 {
-	void __iomem *lock_addr = lock->priv;
+	void __iomem *lock_addr = (void __iomem __force *)lock->priv;
 	u32 status;
 
 	writel(NVT_MUTEX_KEY, lock_addr);
@@ -66,7 +66,7 @@ static int nvt_hwsem_trylock(struct hwspinlock *lock)
 
 static void nvt_hwsem_unlock(struct hwspinlock *lock)
 {
-	void __iomem *lock_addr = lock->priv;
+	void __iomem *lock_addr = (void __iomem __force *)lock->priv;
 
 	writel(NVT_MUTEX_KEY, lock_addr);
 }
@@ -91,8 +91,8 @@ static int nvt_hwsem_probe(struct platform_device *pdev)
 	int i, ret;
 
 	io_base = devm_platform_ioremap_resource(pdev, 0);
-	if (!io_base)
-		return -ENOMEM;
+	if (IS_ERR(io_base))
+		return PTR_ERR(io_base);
 
 	array_size = NVT_MUTEX_NUM_LOCKS * sizeof(struct hwspinlock);
 	hw = devm_kzalloc(&pdev->dev, sizeof(*hw) + array_size, GFP_KERNEL);
@@ -107,15 +107,16 @@ static int nvt_hwsem_probe(struct platform_device *pdev)
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
-	hwsem_UnLockReg(regmap);
+	hwsem_unlock_reg(regmap);
 	ret = clk_prepare_enable(hw->clk);
-	hwsem_LockReg(regmap);
+	hwsem_lock_reg(regmap);
 	if (ret)
 		return ret;
 
 	// SEMx begins at offset 0x20, so add 8 words here.
 	for (i = 0; i < NVT_MUTEX_NUM_LOCKS; i++)
-		hw->bank.lock[i].priv = io_base + (i + NVT_MUTEX_REG_OFFSET) * sizeof(u32);
+		hw->bank.lock[i].priv = (void __force *)(io_base +
+							 (i + NVT_MUTEX_REG_OFFSET) * sizeof(u32));
 
 	platform_set_drvdata(pdev, hw);
 	pm_runtime_enable(&pdev->dev);
