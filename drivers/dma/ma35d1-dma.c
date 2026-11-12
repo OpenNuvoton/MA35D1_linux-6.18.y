@@ -30,18 +30,18 @@
 #define PDMA_OFFSET_CHAN_SIZE		0x10
 #define PDMA_DSCT_CTL			0x0
 #define   PDMA_OP_STOP			0x0
-#define   PDMA_OP_BASIC		0x1
+#define   PDMA_OP_BASIC			0x1
 #define   PDMA_OP_SCATTER		0x2
 #define   PDMA_OP_MSK			0x3
-#define   PDMA_TXTYPE			(1<<2)
-#define   PDMA_TBINTDIS		(1<<7)
-#define   PDMA_SAFIX			(3<<8)
-#define   PDMA_DAFIX			(3<<10)
-#define   PDMA_TXWIDTH_1_BYTE		(0<<12)
-#define   PDMA_TXWIDTH_2_BYTES	(1<<12)
-#define   PDMA_TXWIDTH_4_BYTES	(2<<12)
-#define   PDMA_TXCNT(cnt)		((cnt)<<16)
-#define   PDMA_GET_TXCNT(ctrl)	((ctrl>>16)&0xffff)
+#define   PDMA_TXTYPE			BIT(2)
+#define   PDMA_TBINTDIS			BIT(7)
+#define   PDMA_SAFIX			(3 << 8)
+#define   PDMA_DAFIX			(3 << 10)
+#define   PDMA_TXWIDTH_1_BYTE		(0 << 12)
+#define   PDMA_TXWIDTH_2_BYTES		BIT(12)
+#define   PDMA_TXWIDTH_4_BYTES		(2 << 12)
+#define   PDMA_TXCNT(cnt)		((cnt) << 16)
+#define   PDMA_GET_TXCNT(ctrl)		(((ctrl) >> 16) & 0xffff)
 #define PDMA_DSCT_SA			0x004
 #define PDMA_DSCT_DA			0x008
 #define PDMA_DSCT_NEXT			0x00c
@@ -74,7 +74,7 @@ struct ma35d1_desc {
 	bool cyclic;
 	unsigned int sglen;
 	struct virt_dma_desc vd;
-	uint32_t ctl;
+	u32 ctl;
 	struct ma35d1_peripheral pcfg;
 	unsigned int sg_addr;
 	struct ma35d1_sg sg[];
@@ -152,10 +152,11 @@ static int ma35d1_terminate_all(struct dma_chan *chan)
 		ch->desc = NULL;
 	}
 
-	spin_lock_irqsave(&ch->edma->lock, flags);
+	/* IRQs are already disabled by the vc.lock above */
+	spin_lock(&ch->edma->lock);
 	val = readl(ch->base + PDMA_CHCTL) & ~(1 << ch->ch_num);
 	writel(val, ch->base + PDMA_CHCTL);
-	spin_unlock_irqrestore(&ch->edma->lock, flags);
+	spin_unlock(&ch->edma->lock);
 
 	vchan_get_all_descriptors(&ch->vc, &head);
 	vchan_dma_desc_free_list(&ch->vc, &head);
@@ -463,7 +464,7 @@ static struct dma_chan *ma35d1_of_xlate(struct of_phandle_args *dma_spec, struct
 	if (request >= edma->nr_chans)
 		return NULL;
 
-	return dma_get_slave_channel(&(edma->channels[request].vc.chan));
+	return dma_get_slave_channel(&edma->channels[request].vc.chan);
 }
 
 static int ma35d1_alloc_chan_resources(struct dma_chan *chan)
@@ -546,7 +547,6 @@ static void ma35d1_issue_pending(struct dma_chan *chan)
 static enum dma_status ma35d1_tx_status(struct dma_chan *chan, dma_cookie_t cookie,
 					struct dma_tx_state *txstate)
 {
-
 	struct ma35d1_chan *ch = to_ma35d1_dma_chan(chan);
 	enum dma_status ret;
 	unsigned long flags;
@@ -582,8 +582,9 @@ static irqreturn_t ma35d1_dma_interrupt(int irq, void *devid)
 				if (!ch->desc->cyclic) {
 					vchan_cookie_complete(&ch->desc->vd);
 					ma35d1_dma_start_desc(&ch->vc.chan);
-				} else
+				} else {
 					vchan_cyclic_callback(&ch->desc->vd);
+				}
 			}
 		}
 
@@ -611,14 +612,6 @@ static irqreturn_t ma35d1_dma_interrupt(int irq, void *devid)
 	}
 
 	return IRQ_HANDLED;
-}
-
-static void ma35d1_dma_release(struct dma_device *dma_dev)
-{
-	struct ma35d1_dmadev *edma = container_of(dma_dev, struct ma35d1_dmadev, ddev);
-
-	put_device(edma->ddev.dev);
-	kfree(edma);
 }
 
 static int ma35d1_probe(struct platform_device *pdev)
@@ -682,7 +675,6 @@ static int ma35d1_probe(struct platform_device *pdev)
 	edma->ddev.device_tx_status = ma35d1_tx_status;
 	edma->ddev.device_config = ma35d1_slave_config;
 	edma->ddev.device_terminate_all = ma35d1_terminate_all;
-	edma->ddev.device_release = ma35d1_dma_release;
 	edma->ddev.dev = dev;
 	edma->ddev.src_addr_widths = BIT(DMA_SLAVE_BUSWIDTH_4_BYTES) |
 	    BIT(DMA_SLAVE_BUSWIDTH_2_BYTES) | BIT(DMA_SLAVE_BUSWIDTH_1_BYTE);
