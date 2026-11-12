@@ -25,7 +25,7 @@
 #define ma35_layer(p) \
 	container_of(p, struct ma35_layer, drm_plane)
 
-static uint32_t ma35_layer_formats[] = {
+static u32 ma35_layer_formats[] = {
 	/* rgb32 */
 	DRM_FORMAT_ARGB8888,
 	DRM_FORMAT_XRGB8888,
@@ -45,7 +45,7 @@ static uint32_t ma35_layer_formats[] = {
 	DRM_FORMAT_P010,
 };
 
-static uint32_t ma35_cursor_formats[] = {
+static u32 ma35_cursor_formats[] = {
 	DRM_FORMAT_ARGB8888,
 	DRM_FORMAT_XRGB8888,
 };
@@ -235,7 +235,7 @@ static int ma35_layer_blend_mode_select(u32 mode, u32 *reg)
  * cursor: cursor size, hotspot
  */
 static int ma35_plane_atomic_check(struct drm_plane *drm_plane,
-				      struct drm_atomic_state *state)
+				   struct drm_atomic_state *state)
 {
 	struct drm_device *drm_dev = drm_plane->dev;
 	struct ma35_layer *layer = ma35_layer(drm_plane);
@@ -272,13 +272,13 @@ static int ma35_plane_atomic_check(struct drm_plane *drm_plane,
 	}
 
 	if ((layer->config.swizzle & MA35_SWIZZLE_ARGB_MASK) &&
-		fb->format->is_yuv) {
+	    fb->format->is_yuv) {
 		drm_err(drm_dev, "Invalid swizzle mode for RGB format\n");
 		return -EINVAL;
 	}
 
 	if ((layer->config.swizzle & MA35_SWIZZLE_UV_MASK) &&
-		!fb->format->is_yuv) {
+	    !fb->format->is_yuv) {
 		drm_err(drm_dev, "Invalid swizzle mode for YUV format\n");
 		return -EINVAL;
 	}
@@ -290,7 +290,7 @@ static int ma35_plane_atomic_check(struct drm_plane *drm_plane,
 }
 
 static int ma35_cursor_plane_atomic_check(struct drm_plane *drm_plane,
-				      struct drm_atomic_state *state)
+					  struct drm_atomic_state *state)
 {
 	struct drm_device *drm_dev = drm_plane->dev;
 	struct drm_plane_state *new_state =
@@ -300,7 +300,7 @@ static int ma35_cursor_plane_atomic_check(struct drm_plane *drm_plane,
 	struct drm_crtc_state *crtc_state;
 
 	// allowed for user deattach cursor plane
-	if(!fb)
+	if (!fb)
 		return 0;
 
 	if (!crtc)
@@ -318,7 +318,7 @@ static int ma35_cursor_plane_atomic_check(struct drm_plane *drm_plane,
 
 	if (new_state->crtc_w != MA35_CURSOR_SIZE || new_state->crtc_h != MA35_CURSOR_SIZE) {
 		drm_err(drm_dev, "Unsupported cursor size: %ux%u\n",
-				new_state->crtc_w, new_state->crtc_h);
+			new_state->crtc_w, new_state->crtc_h);
 		return -EINVAL;
 	}
 
@@ -328,13 +328,13 @@ static int ma35_cursor_plane_atomic_check(struct drm_plane *drm_plane,
 }
 
 static int ma35_cursor_plane_atomic_async_check(struct drm_plane *drm_plane,
-				      struct drm_atomic_state *state, bool flip)
+						struct drm_atomic_state *state, bool flip)
 {
 	return ma35_cursor_plane_atomic_check(drm_plane, state);
 }
 
 static void ma35_overlay_position_update(struct ma35_drm *priv,
-						int x, int y, uint32_t w, uint32_t h)
+					 int x, int y, uint32_t w, uint32_t h)
 {
 	u32 reg;
 	int right, bottom;
@@ -366,7 +366,7 @@ static void ma35_overlay_position_update(struct ma35_drm *priv,
  * timing, gamma
  */
 static void ma35_plane_atomic_update(struct drm_plane *drm_plane,
-					struct drm_atomic_state *state)
+				     struct drm_atomic_state *state)
 {
 	struct ma35_layer *layer = ma35_layer(drm_plane);
 	struct ma35_drm *priv = ma35_drm(drm_plane->dev);
@@ -383,11 +383,10 @@ static void ma35_plane_atomic_update(struct drm_plane *drm_plane,
 		reg = FIELD_PREP(MA35_PRIMARY_FORMAT_MASK, format) |
 			  FIELD_PREP(MA35_PRIMARY_SWIZZLE_MASK, layer->config.swizzle) |
 			  MA35_PRIMARY_RESET | MA35_PRIMARY_ENABLE;
-		if(layer->config.colorkeylo || layer->config.colorkeyup) {
+		if (layer->config.colorkeylo || layer->config.colorkeyup)
 			reg |= FIELD_PREP(MA35_PRIMARY_TRANSPARENCY_MASK, MA35_COLORKEY_ENABLE);
-		} else {
+		else
 			reg |= FIELD_PREP(MA35_PRIMARY_TRANSPARENCY_MASK, MA35_COLORKEY_DISABLE);
-		}
 		regmap_write(priv->regmap, MA35_FRAMEBUFFER_CONFIG, reg);
 
 		reg = FIELD_PREP(MA35_LAYER_FB_HEIGHT, fb->height) |
@@ -407,11 +406,10 @@ static void ma35_plane_atomic_update(struct drm_plane *drm_plane,
 		reg = FIELD_PREP(MA35_OVERLAY_FORMAT_MASK, format) |
 			  FIELD_PREP(MA35_OVERLAY_SWIZZLE_MASK, layer->config.swizzle) |
 			  MA35_OVERLAY_ENABLE;
-		if(layer->config.colorkeylo || layer->config.colorkeyup) {
+		if (layer->config.colorkeylo || layer->config.colorkeyup)
 			reg |= FIELD_PREP(MA35_OVERLAY_TRANSPARENCY_MASK, MA35_COLORKEY_ENABLE);
-		} else {
+		else
 			reg |= FIELD_PREP(MA35_OVERLAY_TRANSPARENCY_MASK, MA35_COLORKEY_DISABLE);
-		}
 		regmap_write(priv->regmap, MA35_OVERLAY_CONFIG, reg);
 
 		reg = FIELD_PREP(MA35_LAYER_FB_HEIGHT, fb->height) |
@@ -419,21 +417,23 @@ static void ma35_plane_atomic_update(struct drm_plane *drm_plane,
 		regmap_write(priv->regmap, MA35_OVERLAY_SIZE, reg);
 		// can_position
 		ma35_overlay_position_update(priv, new_state->crtc_x, new_state->crtc_y,
-			new_state->crtc_w, new_state->crtc_h);
+					     new_state->crtc_w, new_state->crtc_h);
 		// alpha blending
 		if (fb->format->format == DRM_FORMAT_ARGB8888 ||
-			fb->format->format == DRM_FORMAT_ARGB4444 ||
+		    fb->format->format == DRM_FORMAT_ARGB4444 ||
 			fb->format->format == DRM_FORMAT_ARGB1555) {
 			ma35_layer_blend_mode_select(layer->config.blend_mode, &reg);
 			reg |= FIELD_PREP(MA35_SRC_ALPHA_MODE, (u32)layer->config.alpha_mode[0]) |
-				   FIELD_PREP(MA35_DST_ALPHA_MODE, (u32)layer->config.alpha_mode[1]);
+			       FIELD_PREP(MA35_DST_ALPHA_MODE, (u32)layer->config.alpha_mode[1]);
 			regmap_write(priv->regmap, MA35_OVERLAY_ALPHA_BLEND_CONFIG, reg);
 
-			regmap_write(priv->regmap, MA35_OVERLAY_SRC_GLOBAL_COLOR, layer->config.src_color);
-			regmap_write(priv->regmap, MA35_OVERLAY_DST_GLOBAL_COLOR, layer->config.dst_color);
+			regmap_write(priv->regmap, MA35_OVERLAY_SRC_GLOBAL_COLOR,
+				     layer->config.src_color);
+			regmap_write(priv->regmap, MA35_OVERLAY_DST_GLOBAL_COLOR,
+				     layer->config.dst_color);
 		} else {
 			regmap_update_bits(priv->regmap, MA35_OVERLAY_ALPHA_BLEND_CONFIG,
-				MA35_ALPHA_BLEND_DISABLE, MA35_ALPHA_BLEND_DISABLE);
+					   MA35_ALPHA_BLEND_DISABLE, MA35_ALPHA_BLEND_DISABLE);
 		}
 
 		// clear value, unused
@@ -467,7 +467,7 @@ static void ma35_cursor_position_update(struct ma35_drm *priv, int x, int y)
 }
 
 static void ma35_cursor_plane_atomic_update(struct drm_plane *drm_plane,
-					struct drm_atomic_state *state)
+					    struct drm_atomic_state *state)
 {
 	struct ma35_layer *layer = ma35_layer(drm_plane);
 	struct ma35_drm *priv = ma35_drm(drm_plane->dev);
@@ -480,7 +480,7 @@ static void ma35_cursor_plane_atomic_update(struct drm_plane *drm_plane,
 
 	if (!new_state->visible) {
 		regmap_update_bits(priv->regmap, MA35_CURSOR_CONFIG,
-			MA35_CURSOR_FORMAT_MASK, MA35_CURSOR_FORMAT_DISABLE);
+				   MA35_CURSOR_FORMAT_MASK, MA35_CURSOR_FORMAT_DISABLE);
 		return;
 	}
 
@@ -493,12 +493,12 @@ static void ma35_cursor_plane_atomic_update(struct drm_plane *drm_plane,
 		regmap_write(priv->regmap, MA35_CURSOR_ADDRESS, layer->fb_base[0]);
 
 		regmap_update_bits(priv->regmap, MA35_CURSOR_CONFIG,
-			MA35_CURSOR_FORMAT_MASK, MA35_CURSOR_FORMAT_A8R8G8B8);
+				   MA35_CURSOR_FORMAT_MASK, MA35_CURSOR_FORMAT_A8R8G8B8);
 	}
 }
 
 static void ma35_cursor_plane_atomic_async_update(struct drm_plane *drm_plane,
-					struct drm_atomic_state *state)
+						  struct drm_atomic_state *state)
 {
 	struct ma35_layer *layer = ma35_layer(drm_plane);
 	struct ma35_drm *priv = ma35_drm(drm_plane->dev);
@@ -522,7 +522,7 @@ static void ma35_cursor_plane_atomic_async_update(struct drm_plane *drm_plane,
 
 	if (!new_state->visible) {
 		regmap_update_bits(priv->regmap, MA35_CURSOR_CONFIG,
-			MA35_CURSOR_FORMAT_MASK, MA35_CURSOR_FORMAT_DISABLE);
+				   MA35_CURSOR_FORMAT_MASK, MA35_CURSOR_FORMAT_DISABLE);
 		return;
 	}
 
@@ -535,31 +535,31 @@ static void ma35_cursor_plane_atomic_async_update(struct drm_plane *drm_plane,
 		regmap_write(priv->regmap, MA35_CURSOR_ADDRESS, layer->fb_base[0]);
 
 		regmap_update_bits(priv->regmap, MA35_CURSOR_CONFIG,
-			MA35_CURSOR_FORMAT_MASK, MA35_CURSOR_FORMAT_A8R8G8B8);
+				   MA35_CURSOR_FORMAT_MASK, MA35_CURSOR_FORMAT_A8R8G8B8);
 	}
 }
 
 static void ma35_plane_atomic_disable(struct drm_plane *drm_plane,
-				 struct drm_atomic_state *state)
+				      struct drm_atomic_state *state)
 {
 	struct ma35_drm *priv = ma35_drm(drm_plane->dev);
 
 	if (drm_plane->type == DRM_PLANE_TYPE_PRIMARY) {
 		regmap_update_bits(priv->regmap, MA35_FRAMEBUFFER_CONFIG,
-			MA35_PRIMARY_ENABLE, 0);
+				   MA35_PRIMARY_ENABLE, 0);
 	} else if (drm_plane->type == DRM_PLANE_TYPE_OVERLAY) {
 		regmap_update_bits(priv->regmap, MA35_OVERLAY_CONFIG,
-			MA35_OVERLAY_ENABLE, 0);
+				   MA35_OVERLAY_ENABLE, 0);
 	}
 }
 
 static void ma35_cursor_plane_atomic_disable(struct drm_plane *drm_plane,
-					 struct drm_atomic_state *state)
+					     struct drm_atomic_state *state)
 {
 	struct ma35_drm *priv = ma35_drm(drm_plane->dev);
 
 	regmap_update_bits(priv->regmap, MA35_CURSOR_CONFIG,
-		MA35_CURSOR_FORMAT_MASK, MA35_CURSOR_FORMAT_DISABLE);
+			   MA35_CURSOR_FORMAT_MASK, MA35_CURSOR_FORMAT_DISABLE);
 }
 
 static struct drm_plane_helper_funcs ma35_plane_helper_funcs = {
@@ -577,63 +577,62 @@ static struct drm_plane_helper_funcs ma35_cursor_plane_helper_funcs = {
 };
 
 static int ma35_plane_set_property(struct drm_plane *drm_plane,
-	struct drm_plane_state *state, struct drm_property *property,
+				   struct drm_plane_state *state, struct drm_property *property,
 	uint64_t val)
 {
 	struct ma35_layer *layer = ma35_layer(drm_plane);
 
-	if (property == layer->blend_mode_prop) {
+	if (property == layer->blend_mode_prop)
 		layer->config.blend_mode = val;
-	} else if (property == layer->src_alpha_mode_prop) {
+	else if (property == layer->src_alpha_mode_prop)
 		layer->config.alpha_mode[0] = val;
-	} else if (property == layer->dst_alpha_mode_prop) {
+	else if (property == layer->dst_alpha_mode_prop)
 		layer->config.alpha_mode[1] = val;
-	} else if (property == layer->src_color_prop) {
+	else if (property == layer->src_color_prop)
 		layer->config.src_color = val;
-	} else if (property == layer->dst_color_prop) {
+	else if (property == layer->dst_color_prop)
 		layer->config.dst_color = val;
-	} else if (property == layer->swizzle_prop) {
+	else if (property == layer->swizzle_prop)
 		layer->config.swizzle = val;
-	} else if (property == layer->colorkeylo_prop) {
+	else if (property == layer->colorkeylo_prop)
 		layer->config.colorkeylo = val;
-	} else if (property == layer->colorkeyup_prop) {
+	else if (property == layer->colorkeyup_prop)
 		layer->config.colorkeyup = val;
-	} else if (property == layer->background_prop) {
+	else if (property == layer->background_prop)
 		layer->config.background = val;
-	} else {
+	else
 		return -EINVAL;
-	}
 
 	return 0;
 }
 
 static int ma35_plane_get_property(struct drm_plane *drm_plane,
-	const struct drm_plane_state *state, struct drm_property *property,
-	uint64_t *val)
+				   const struct drm_plane_state *state,
+				   struct drm_property *property,
+				   uint64_t *val)
 {
 	struct ma35_layer *layer = ma35_layer(drm_plane);
 
-	if (property == layer->blend_mode_prop) {
+	if (property == layer->blend_mode_prop)
 		*val = layer->config.blend_mode;
-	} else if (property == layer->src_alpha_mode_prop) {
+	else if (property == layer->src_alpha_mode_prop)
 		*val = layer->config.alpha_mode[0];
-	} else if (property == layer->dst_alpha_mode_prop) {
+	else if (property == layer->dst_alpha_mode_prop)
 		*val = layer->config.alpha_mode[1];
-	} else if (property == layer->src_color_prop) {
+	else if (property == layer->src_color_prop)
 		*val = layer->config.src_color;
-	} else if (property == layer->dst_color_prop) {
+	else if (property == layer->dst_color_prop)
 		*val = layer->config.dst_color;
-	} else if (property == layer->swizzle_prop) {
+	else if (property == layer->swizzle_prop)
 		*val = layer->config.swizzle;
-	} else if (property == layer->colorkeylo_prop) {
+	else if (property == layer->colorkeylo_prop)
 		*val = layer->config.colorkeylo;
-	} else if (property == layer->colorkeyup_prop) {
+	else if (property == layer->colorkeyup_prop)
 		*val = layer->config.colorkeyup;
-	} else if (property == layer->background_prop) {
+	else if (property == layer->background_prop)
 		*val = layer->config.background;
-	} else {
+	else
 		return -EINVAL;
-	}
 
 	return 0;
 }
@@ -659,7 +658,7 @@ static const struct drm_plane_funcs ma35_cursor_plane_funcs = {
 };
 
 static int ma35_layer_create_properties(struct ma35_drm *priv,
-				      struct ma35_layer *layer)
+					struct ma35_layer *layer)
 {
 	struct drm_device *drm_dev = &priv->drm_dev;
 	struct drm_mode_config *mode_config = &drm_dev->mode_config;
@@ -670,35 +669,41 @@ static int ma35_layer_create_properties(struct ma35_drm *priv,
 	layer->config.depth = mode_config->preferred_depth;
 
 	if (ma35_plane_properties[drm_plane->type].alpha) {
-		layer->blend_mode_prop = drm_property_create_enum(drm_dev, 0, "porter-duff-blend-mode",
-							ma35_blend_modes, ARRAY_SIZE(ma35_blend_modes));
+		layer->blend_mode_prop =
+			drm_property_create_enum(drm_dev, 0, "porter-duff-blend-mode",
+						 ma35_blend_modes, ARRAY_SIZE(ma35_blend_modes));
 		if (!layer->blend_mode_prop) {
 			drm_err(drm_dev, "Failed to create blend mode property\n");
 			return -ENOMEM;
 		}
-		drm_object_attach_property(&drm_plane->base, layer->blend_mode_prop, MA35_ALPHA_SRC_OVER);
+		drm_object_attach_property(&drm_plane->base, layer->blend_mode_prop,
+					   MA35_ALPHA_SRC_OVER);
 		layer->config.blend_mode = MA35_ALPHA_SRC_OVER;
 
-		layer->src_alpha_mode_prop = drm_property_create_enum(drm_dev, 0, "source-alpha-mode",
-							ma35_alpha_modes, ARRAY_SIZE(ma35_alpha_modes));
+		layer->src_alpha_mode_prop =
+			drm_property_create_enum(drm_dev, 0, "source-alpha-mode",
+						 ma35_alpha_modes, ARRAY_SIZE(ma35_alpha_modes));
 		if (!layer->src_alpha_mode_prop) {
 			drm_err(drm_dev, "Failed to create source alpha property\n");
 			return -ENOMEM;
 		}
-		drm_object_attach_property(&drm_plane->base, layer->src_alpha_mode_prop, MA35_ALPHA_MODE_NONE);
+		drm_object_attach_property(&drm_plane->base, layer->src_alpha_mode_prop,
+					   MA35_ALPHA_MODE_NONE);
 		layer->config.alpha_mode[0] = MA35_ALPHA_MODE_NONE;
 
-		layer->dst_alpha_mode_prop = drm_property_create_enum(drm_dev, 0, "destination-alpha-mode",
-							ma35_alpha_modes, ARRAY_SIZE(ma35_alpha_modes));
+		layer->dst_alpha_mode_prop =
+			drm_property_create_enum(drm_dev, 0, "destination-alpha-mode",
+						 ma35_alpha_modes, ARRAY_SIZE(ma35_alpha_modes));
 		if (!layer->dst_alpha_mode_prop) {
 			drm_err(drm_dev, "Failed to create destination alpha property\n");
 			return -ENOMEM;
 		}
-		drm_object_attach_property(&drm_plane->base, layer->dst_alpha_mode_prop, MA35_ALPHA_MODE_NONE);
+		drm_object_attach_property(&drm_plane->base, layer->dst_alpha_mode_prop,
+					   MA35_ALPHA_MODE_NONE);
 		layer->config.alpha_mode[1] = MA35_ALPHA_MODE_NONE;
 
 		layer->src_color_prop = drm_property_create_range(drm_dev, 0, "source-global-color",
-							0, 0xffffffff);
+								  0, 0xffffffff);
 		if (!layer->src_color_prop) {
 			drm_err(drm_dev, "Failed to create source color property\n");
 			return -ENOMEM;
@@ -706,8 +711,9 @@ static int ma35_layer_create_properties(struct ma35_drm *priv,
 		drm_object_attach_property(&drm_plane->base, layer->src_color_prop, 0);
 		layer->config.src_color = 0;
 
-		layer->dst_color_prop = drm_property_create_range(drm_dev, 0, "destination-global-color",
-							0, 0xffffffff);
+		layer->dst_color_prop =
+			drm_property_create_range(drm_dev, 0, "destination-global-color",
+						  0, 0xffffffff);
 		if (!layer->dst_color_prop) {
 			drm_err(drm_dev, "Failed to create destination color property\n");
 			return -ENOMEM;
@@ -717,19 +723,22 @@ static int ma35_layer_create_properties(struct ma35_drm *priv,
 	}
 
 	if (ma35_plane_properties[drm_plane->type].swizzle) {
-		layer->swizzle_prop = drm_property_create_enum(drm_dev, 0, "swizzle",
-							ma35_swizzles, ARRAY_SIZE(ma35_swizzles));
+		layer->swizzle_prop =
+			drm_property_create_enum(drm_dev, 0, "swizzle",
+						 ma35_swizzles, ARRAY_SIZE(ma35_swizzles));
 		if (!layer->swizzle_prop) {
 			drm_err(drm_dev, "Failed to create swizzle property\n");
 			return -ENOMEM;
 		}
-		drm_object_attach_property(&drm_plane->base, layer->swizzle_prop, MA35_SWIZZLE_ARGB);
+		drm_object_attach_property(&drm_plane->base, layer->swizzle_prop,
+					   MA35_SWIZZLE_ARGB);
 		layer->config.swizzle = MA35_SWIZZLE_ARGB;
 	}
 
 	if (ma35_plane_properties[drm_plane->type].colorkey) {
-		layer->colorkeylo_prop = drm_property_create_range(drm_dev, 0, "colorkey-lower-bound",
-							0, 0xffffffff);
+		layer->colorkeylo_prop =
+			drm_property_create_range(drm_dev, 0, "colorkey-lower-bound",
+						  0, 0xffffffff);
 		if (!layer->colorkeylo_prop) {
 			drm_err(drm_dev, "Failed to create colorkey property\n");
 			return -ENOMEM;
@@ -737,8 +746,9 @@ static int ma35_layer_create_properties(struct ma35_drm *priv,
 		drm_object_attach_property(&drm_plane->base, layer->colorkeylo_prop, 0);
 		layer->config.colorkeylo = 0;
 
-		layer->colorkeyup_prop = drm_property_create_range(drm_dev, 0, "colorkey-upper-bound",
-							0, 0xffffffff);
+		layer->colorkeyup_prop =
+			drm_property_create_range(drm_dev, 0, "colorkey-upper-bound",
+						  0, 0xffffffff);
 		if (!layer->colorkeyup_prop) {
 			drm_err(drm_dev, "Failed to create colorkey property\n");
 			return -ENOMEM;
@@ -749,7 +759,7 @@ static int ma35_layer_create_properties(struct ma35_drm *priv,
 
 	if (ma35_plane_properties[drm_plane->type].background) {
 		layer->background_prop = drm_property_create_range(drm_dev, 0, "background",
-							0, 0xffffffff);
+								   0, 0xffffffff);
 		if (!layer->background_prop) {
 			drm_err(drm_dev, "Failed to create background property\n");
 			return -ENOMEM;
@@ -762,7 +772,7 @@ static int ma35_layer_create_properties(struct ma35_drm *priv,
 }
 
 static int ma35_cursor_of_parse(struct ma35_drm *priv,
-				      struct ma35_layer *layer)
+				struct ma35_layer *layer)
 {
 	struct device_node *of_node = layer->of_node;
 	u32 offset;
@@ -777,24 +787,25 @@ static int ma35_cursor_of_parse(struct ma35_drm *priv,
 	 * so we parse them from device tree.
 	 */
 	ret = of_property_read_u32(of_node, "HOTSPOT_X", &offset);
-	if (ret)
+	if (ret) {
 		layer->config.hotspot_x = 0;
-	else {
+	} else {
 		if (offset >= MA35_CURSOR_SIZE)
-			return -1;
+			return -EINVAL;
 		layer->config.hotspot_x = offset;
 	}
 
 	ret = of_property_read_u32(of_node, "HOTSPOT_Y", &offset);
-	if (ret)
+	if (ret) {
 		layer->config.hotspot_y = 0;
-	else {
+	} else {
 		if (offset >= MA35_CURSOR_SIZE)
-			return -1;
+			return -EINVAL;
 		layer->config.hotspot_y = offset;
 	}
 
 	u32 reg;
+
 	reg = FIELD_PREP(MA35_CURSOR_HOTSPOT_X_MASK, layer->config.hotspot_x) |
 		  FIELD_PREP(MA35_CURSOR_HOTSPOT_Y_MASK, layer->config.hotspot_y);
 	regmap_write(priv->regmap, MA35_CURSOR_CONFIG, reg);
@@ -803,7 +814,7 @@ static int ma35_cursor_of_parse(struct ma35_drm *priv,
 }
 
 struct ma35_layer *ma35_layer_get_from_index(struct ma35_drm *priv,
-						   u32 index)
+					     u32 index)
 {
 	struct ma35_layer *layer;
 
@@ -830,8 +841,8 @@ struct ma35_layer *ma35_layer_get_from_type(struct ma35_drm *priv, enum drm_plan
 }
 
 static int ma35_layer_create(struct ma35_drm *priv,
-			      struct device_node *of_node, u32 index,
-			      enum drm_plane_type type)
+			     struct device_node *of_node, u32 index,
+			     enum drm_plane_type type)
 {
 	struct drm_device *drm_dev = &priv->drm_dev;
 	struct device *dev = drm_dev->dev;
@@ -850,30 +861,32 @@ static int ma35_layer_create(struct ma35_drm *priv,
 
 	if (type == DRM_PLANE_TYPE_CURSOR) {
 		ret = drm_universal_plane_init(drm_dev, &layer->drm_plane,
-			1 << MA35_DEFAULT_CRTC_ID,
+					       1 << MA35_DEFAULT_CRTC_ID,
 			&ma35_cursor_plane_funcs, ma35_cursor_formats,
 			ARRAY_SIZE(ma35_cursor_formats), NULL, type, NULL);
 		if (ret) {
 			drm_err(drm_dev, "Failed to initialize layer plane\n");
-			return ret;
+			goto error;
 		}
 
-		if (ma35_cursor_of_parse(priv, layer)) {
+		ret = ma35_cursor_of_parse(priv, layer);
+		if (ret) {
 			drm_err(drm_dev, "Unsupported cursor hotspot offset\n");
 			goto error;
 		}
 		drm_plane_helper_add(&layer->drm_plane, &ma35_cursor_plane_helper_funcs);
 	} else {
 		ret = drm_universal_plane_init(drm_dev, &layer->drm_plane,
-			1 << MA35_DEFAULT_CRTC_ID,
+					       1 << MA35_DEFAULT_CRTC_ID,
 			&ma35_plane_funcs, ma35_layer_formats,
 			ARRAY_SIZE(ma35_layer_formats), NULL, type, NULL);
 		if (ret) {
 			drm_err(drm_dev, "Failed to initialize layer plane\n");
-			return ret;
+			goto error;
 		}
 
-		if (ma35_layer_create_properties(priv, layer)) {
+		ret = ma35_layer_create_properties(priv, layer);
+		if (ret) {
 			drm_err(drm_dev, "Failed to parse config for layer #%d\n",
 				index);
 			goto error;
@@ -898,7 +911,7 @@ error:
 }
 
 static void ma35_layer_fini(struct ma35_drm *priv,
-			       struct ma35_layer *layer)
+			    struct ma35_layer *layer)
 {
 	struct device *dev = priv->drm_dev.dev;
 
@@ -909,7 +922,7 @@ static void ma35_layer_fini(struct ma35_drm *priv,
 /* attach overlay to crtc after crtc is init */
 void ma35_overlay_attach_crtc(struct ma35_drm *priv)
 {
-	uint32_t possible_crtcs = drm_crtc_mask(&priv->crtc->drm_crtc);
+	u32 possible_crtcs = drm_crtc_mask(&priv->crtc->drm_crtc);
 	struct ma35_layer *layer;
 	struct drm_plane *drm_plane;
 
@@ -973,7 +986,8 @@ int ma35_plane_init(struct ma35_drm *priv)
 		if (ret)
 			continue;
 
-		ret = of_property_read_string(layer_node, "layer-type", &layer_type_str); // layer type
+		// layer type
+		ret = of_property_read_string(layer_node, "layer-type", &layer_type_str);
 		if (ret) {
 			dev_err(dev, "Failed to read 'layer-type' from node %s\n",
 				layer_node->name);
@@ -981,7 +995,7 @@ int ma35_plane_init(struct ma35_drm *priv)
 		}
 
 		ret = ma35_get_layer_type(layer_type_str, &type);
-		if(ret) {
+		if (ret) {
 			dev_err(dev, "Unknown layer type %s\n", layer_type_str);
 			continue;
 		}
@@ -989,8 +1003,8 @@ int ma35_plane_init(struct ma35_drm *priv)
 		// check if layer already exists
 		layer = ma35_layer_get_from_index(priv, index);
 		if (layer) {
-			drm_err(drm_dev, "Duplicated entry for layer#%d\n", // we support one layer per index
-				index);
+			// we support one layer per index
+			drm_err(drm_dev, "Duplicated entry for layer#%d\n", index);
 			continue;
 		}
 

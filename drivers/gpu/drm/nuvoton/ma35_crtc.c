@@ -52,7 +52,7 @@ static const struct drm_prop_enum_list ma35_dpi_format[] = {
 
 static enum drm_mode_status
 ma35_crtc_mode_valid(struct drm_crtc *drm_crtc,
-			const struct drm_display_mode *mode)
+		     const struct drm_display_mode *mode)
 {
 	struct drm_device *drm_dev = drm_crtc->dev;
 	struct drm_mode_config *mode_config = &drm_dev->mode_config;
@@ -78,7 +78,7 @@ ma35_crtc_mode_valid(struct drm_crtc *drm_crtc,
 }
 
 static int ma35_crtc_atomic_check(struct drm_crtc *drm_crtc,
-					 struct drm_atomic_state *state)
+				  struct drm_atomic_state *state)
 {
 	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, drm_crtc);
 	struct drm_display_mode *mode = &crtc_state->mode;
@@ -90,7 +90,7 @@ static int ma35_crtc_atomic_check(struct drm_crtc *drm_crtc,
 }
 
 static void ma35_crtc_atomic_enable(struct drm_crtc *drm_crtc,
-				       struct drm_atomic_state *state)
+				    struct drm_atomic_state *state)
 {
 	struct ma35_crtc *crtc = ma35_crtc(drm_crtc);
 	struct ma35_drm *priv = ma35_drm(drm_crtc->dev);
@@ -132,7 +132,7 @@ static void ma35_crtc_atomic_enable(struct drm_crtc *drm_crtc,
 	if (display_info->bus_flags & DRM_BUS_FLAG_DE_LOW)
 		reg |= MA35_PANEL_DATA_ENABLE_POLARITY;
 
-	if(display_info->bus_flags & DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE)
+	if (display_info->bus_flags & DRM_BUS_FLAG_PIXDATA_DRIVE_NEGEDGE)
 		reg |= MA35_PANEL_DATA_POLARITY;
 	regmap_write(priv->regmap, MA35_PANEL_CONFIG, reg);
 
@@ -143,21 +143,22 @@ static void ma35_crtc_atomic_enable(struct drm_crtc *drm_crtc,
 			size = new_state->gamma_lut->length / sizeof(struct drm_color_lut);
 
 			for (i = 0; i < size; i++) {
-				regmap_write(priv->regmap, MA35_GAMMA_INDEX, i); // auto increment in spec though
+				// auto increment in spec though
+				regmap_write(priv->regmap, MA35_GAMMA_INDEX, i);
 				// shift DRM gamma 16-bit values to 10-bit
 				reg = FIELD_PREP(MA35_GAMMA_RED_MASK, lut[i].red >> 6) |
-						FIELD_PREP(MA35_GAMMA_GREEN_MASK, lut[i].green >> 6) |
-						FIELD_PREP(MA35_GAMMA_BLUE_MASK, lut[i].blue >> 6);
+				      FIELD_PREP(MA35_GAMMA_GREEN_MASK, lut[i].green >> 6) |
+				      FIELD_PREP(MA35_GAMMA_BLUE_MASK, lut[i].blue >> 6);
 				regmap_write(priv->regmap, MA35_GAMMA_DATA, reg);
 			}
 		}
 		/* Enable gamma */
 		regmap_update_bits(priv->regmap, MA35_FRAMEBUFFER_CONFIG,
-						   MA35_PRIMARY_GAMMA, MA35_PRIMARY_GAMMA);
+				   MA35_PRIMARY_GAMMA, MA35_PRIMARY_GAMMA);
 	} else {
 		/* Disable gamma */
 		regmap_update_bits(priv->regmap, MA35_FRAMEBUFFER_CONFIG,
-						   MA35_PRIMARY_GAMMA, 0);
+				   MA35_PRIMARY_GAMMA, 0);
 	}
 
 	/* DPI format */
@@ -166,9 +167,8 @@ static void ma35_crtc_atomic_enable(struct drm_crtc *drm_crtc,
 
 	/* Dither */
 	if (crtc->dither_enable) {
-		for (i = 0, reg = 0; i < MA35_DITHER_TABLE_ENTRY / 2; i++) {
+		for (i = 0, reg = 0; i < MA35_DITHER_TABLE_ENTRY / 2; i++)
 			reg |= (crtc->dither_depth & MA35_DITHER_TABLE_MASK) << (i * 4);
-		}
 		regmap_write(priv->regmap, MA35_DISPLAY_DITHER_TABLE_LOW, reg);
 		regmap_write(priv->regmap, MA35_DISPLAY_DITHER_TABLE_HIGH, reg);
 		regmap_write(priv->regmap, MA35_DISPLAY_DITHER_CONFIG, MA35_DITHER_ENABLE);
@@ -180,7 +180,7 @@ static void ma35_crtc_atomic_enable(struct drm_crtc *drm_crtc,
 }
 
 static void ma35_crtc_atomic_disable(struct drm_crtc *drm_crtc,
-					struct drm_atomic_state *state)
+				     struct drm_atomic_state *state)
 {
 	struct ma35_drm *priv = ma35_drm(drm_crtc->dev);
 	struct drm_device *drm_dev = drm_crtc->dev;
@@ -189,9 +189,9 @@ static void ma35_crtc_atomic_disable(struct drm_crtc *drm_crtc,
 
 	/* Disable and clear CRTC bits. */
 	regmap_update_bits(priv->regmap, MA35_PANEL_CONFIG,
-					   MA35_PANEL_DATA_ENABLE_ENABLE, 0);
+			   MA35_PANEL_DATA_ENABLE_ENABLE, 0);
 	regmap_update_bits(priv->regmap, MA35_FRAMEBUFFER_CONFIG,
-					   MA35_PRIMARY_GAMMA, 0);
+			   MA35_PRIMARY_GAMMA, 0);
 	regmap_write(priv->regmap, MA35_DISPLAY_DITHER_CONFIG, 0);
 
 	/* Consume any leftover event since vblank is now disabled. */
@@ -205,7 +205,7 @@ static void ma35_crtc_atomic_disable(struct drm_crtc *drm_crtc,
 }
 
 static void ma35_crtc_atomic_flush(struct drm_crtc *drm_crtc,
-	struct drm_atomic_state *state)
+				   struct drm_atomic_state *state)
 {
 	spin_lock_irq(&drm_crtc->dev->event_lock);
 	if (drm_crtc->state->event) {
@@ -258,7 +258,7 @@ static int ma35_crtc_enable_vblank(struct drm_crtc *drm_crtc)
 	struct ma35_drm *priv = ma35_drm(drm_crtc->dev);
 
 	regmap_write(priv->regmap, MA35_DISPLAY_INTRENABLE,
-			  MA35_CRTC_VBLANK);
+		     MA35_CRTC_VBLANK);
 
 	return 0;
 }
@@ -271,7 +271,7 @@ static void ma35_crtc_disable_vblank(struct drm_crtc *drm_crtc)
 }
 
 static int ma35_crtc_gamma_set(struct drm_crtc *drm_crtc,
-		  u16 *r, u16 *g, u16 *b, uint32_t size,
+			       u16 *r, u16 *g, u16 *b, uint32_t size,
 		  struct drm_modeset_acquire_ctx *ctx)
 {
 	struct ma35_drm *priv = ma35_drm(drm_crtc->dev);
@@ -300,15 +300,14 @@ static int ma35_crtc_atomic_set_property(struct drm_crtc *drm_crtc,
 {
 	struct ma35_crtc *crtc = ma35_crtc(drm_crtc);
 
-	if (property == crtc->dpi_format_prop) {
+	if (property == crtc->dpi_format_prop)
 		crtc->dpi_format = value;
-	} else if (property == crtc->dither_enable_prop) {
+	else if (property == crtc->dither_enable_prop)
 		crtc->dither_enable = value;
-	} else if (property == crtc->dither_depth_prop) {
+	else if (property == crtc->dither_depth_prop)
 		crtc->dither_depth = value;
-	} else {
+	else
 		return -EINVAL;
-	}
 
 	return 0;
 }
@@ -320,15 +319,14 @@ static int ma35_crtc_atomic_get_property(struct drm_crtc *drm_crtc,
 {
 	struct ma35_crtc *crtc = ma35_crtc(drm_crtc);
 
-	if (property == crtc->dpi_format_prop) {
+	if (property == crtc->dpi_format_prop)
 		*value = crtc->dpi_format;
-	} else if (property == crtc->dither_enable_prop) {
+	else if (property == crtc->dither_enable_prop)
 		*value = crtc->dither_enable;
-	} else if (property == crtc->dither_depth_prop) {
+	else if (property == crtc->dither_depth_prop)
 		*value = crtc->dither_depth;
-	} else {
+	else
 		return -EINVAL;
-	}
 
 	return 0;
 }
@@ -363,8 +361,9 @@ static int ma35_crtc_create_properties(struct ma35_drm *priv)
 	struct ma35_crtc *crtc = priv->crtc;
 	struct drm_crtc *drm_crtc = &crtc->drm_crtc;
 
-	crtc->dpi_format_prop = drm_property_create_enum(drm_dev, 0, "dpi-format",
-							ma35_dpi_format, ARRAY_SIZE(ma35_dpi_format));
+	crtc->dpi_format_prop =
+		drm_property_create_enum(drm_dev, 0, "dpi-format",
+					 ma35_dpi_format, ARRAY_SIZE(ma35_dpi_format));
 	if (!crtc->dpi_format_prop) {
 		drm_err(drm_dev, "Failed to create dpi format property\n");
 		return -ENOMEM;
@@ -381,7 +380,7 @@ static int ma35_crtc_create_properties(struct ma35_drm *priv)
 	crtc->dither_enable = false;
 
 	crtc->dither_depth_prop = drm_property_create_range(drm_dev, 0, "dither-depth",
-							0, 0xf);
+							    0, 0xf);
 	if (!crtc->dither_depth_prop) {
 		drm_err(drm_dev, "Failed to create dither depth property\n");
 		return -ENOMEM;

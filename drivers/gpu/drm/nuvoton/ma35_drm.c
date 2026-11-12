@@ -35,14 +35,14 @@
 DEFINE_DRM_GEM_DMA_FOPS(ma35_drm_fops);
 
 static int ma35_drm_gem_dma_dumb_create(struct drm_file *file_priv,
-					   struct drm_device *drm_dev,
+					struct drm_device *drm_dev,
 					   struct drm_mode_create_dumb *args)
 {
 	struct drm_mode_config *mode_config = &drm_dev->mode_config;
 	u32 pixel_align;
 
 	if (args->width < mode_config->min_width ||
-		args->height < mode_config->min_height)
+	    args->height < mode_config->min_height)
 		return -EINVAL;
 
 	// check for alignment
@@ -69,7 +69,7 @@ static struct drm_driver ma35_drm_driver = {
 	DRM_FBDEV_DMA_DRIVER_OPS,
 };
 
-static struct regmap_config ma35_drm_regmap_config = {
+static const struct regmap_config ma35_drm_regmap_config = {
 	.reg_bits	= 32,
 	.val_bits	= 32,
 	.reg_stride	= 4,
@@ -279,7 +279,7 @@ static int ma35_drm_probe(struct platform_device *pdev)
 	}
 
 	priv = devm_drm_dev_alloc(dev, &ma35_drm_driver,
-				     struct ma35_drm, drm_dev);
+				  struct ma35_drm, drm_dev);
 	if (IS_ERR(priv)) {
 		ret = PTR_ERR(priv);
 		goto error_reserved_mem;

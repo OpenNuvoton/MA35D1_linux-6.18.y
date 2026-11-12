@@ -28,7 +28,7 @@
 	container_of(e, struct ma35_interface, drm_encoder)
 
 static void ma35_encoder_mode_set(struct drm_encoder *encoder,
-	struct drm_crtc_state *crtc_state,
+				  struct drm_crtc_state *crtc_state,
 	struct drm_connector_state *conn_state)
 {
 	struct drm_device *drm_dev = encoder->dev;
@@ -50,7 +50,8 @@ static void ma35_encoder_mode_set(struct drm_encoder *encoder,
 	if (pll && clk_get_rate(vpll) != pll) {
 		ret = clk_set_rate(vpll, pll);
 		if (ret)
-			drm_err(drm_dev, "Cannot set VPLL to %lu Hz (%d), check the PLL setup in the DT\n",
+			drm_err(drm_dev,
+				"Cannot set VPLL to %lu Hz (%d), check the PLL setup in the DT\n",
 				pll, ret);
 		usleep_range(200, 400);
 	}
@@ -72,7 +73,7 @@ static const struct drm_encoder_helper_funcs ma35_encoder_helper_funcs = {
 
 static void ma35_encoder_attach_crtc(struct ma35_drm *priv)
 {
-	uint32_t possible_crtcs = drm_crtc_mask(&priv->crtc->drm_crtc);
+	u32 possible_crtcs = drm_crtc_mask(&priv->crtc->drm_crtc);
 
 	priv->interface->drm_encoder.possible_crtcs = possible_crtcs;
 }
@@ -126,8 +127,8 @@ int ma35_interface_init(struct ma35_drm *priv)
 	int ret;
 
 	// encoder, connector
-	interface = drmm_simple_encoder_alloc(drm_dev,
-					struct ma35_interface, drm_encoder, DRM_MODE_ENCODER_DPI);
+	interface = drmm_simple_encoder_alloc(drm_dev, struct ma35_interface,
+					      drm_encoder, DRM_MODE_ENCODER_DPI);
 	if (IS_ERR(interface)) {
 		ret = PTR_ERR(interface);
 		drm_err(drm_dev, "Failed to initialize encoder\n");
