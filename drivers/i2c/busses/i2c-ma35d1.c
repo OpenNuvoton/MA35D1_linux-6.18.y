@@ -26,6 +26,7 @@
 #include <linux/cpufreq.h>
 #include <linux/slab.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/reset.h>
@@ -120,6 +121,7 @@
 /* i2c controller private data */
 
 struct ma35d1_i2c {
+	/* protects the transfer state while a transfer is being started */
 	spinlock_t lock;
 	wait_queue_head_t wait;
 
@@ -200,6 +202,7 @@ static void ma35d1_i2c_message_start(struct ma35d1_i2c *i2c)
 static inline void ma35d1_i2c_stop(struct ma35d1_i2c *i2c, int ret)
 {
 	unsigned int i = 0;
+	u32 val;
 
 	dev_dbg(i2c->dev, "STOP\n");
 
@@ -216,14 +219,9 @@ static inline void ma35d1_i2c_stop(struct ma35d1_i2c *i2c, int ret)
 		(I2C_CTL_STO | I2C_CTL_SI)),
 	       (i2c->regs + CTL0));
 
-	for (i = 0; i < STOP_TIMEOUT_MS; i++) {
-		if (!(readl(i2c->regs + CTL0) & I2C_CTL_STO))
-			break;
-
-		udelay(1000);
-	}
-
-	if (i >= STOP_TIMEOUT_MS) {
+	/* called from IRQ context, so poll without sleeping */
+	if (readl_poll_timeout_atomic(i2c->regs + CTL0, val, !(val & I2C_CTL_STO),
+				      1000, STOP_TIMEOUT_MS * 1000)) {
 		dev_dbg(i2c->dev, "I2C Stop Timeout\n");
 
 		writel(I2C_CTL_STO_SI, (i2c->regs + CTL0));
@@ -266,7 +264,7 @@ static inline int is_msgend(struct ma35d1_i2c *i2c)
 	return i2c->msg_ptr >= i2c->msg->len;
 }
 
-static void I2C_SlaveTRx(struct ma35d1_i2c *i2c, unsigned long iicstat)
+static void i2c_ma35d1_irq_slave_trx(struct ma35d1_i2c *i2c, unsigned long iicstat)
 {
 	unsigned char byte;
 
@@ -332,7 +330,7 @@ static void I2C_SlaveTRx(struct ma35d1_i2c *i2c, unsigned long iicstat)
 	}
 }
 
-static void i2c_ma35d1_irq_master_TRx(struct ma35d1_i2c *i2c,
+static void i2c_ma35d1_irq_master_trx(struct ma35d1_i2c *i2c,
 				      unsigned long iicstat)
 {
 	unsigned char byte;
@@ -340,14 +338,15 @@ static void i2c_ma35d1_irq_master_TRx(struct ma35d1_i2c *i2c,
 	if (iicstat == M_START) {
 		/* START has been transmitted and prepare SLA+W */
 
-		if (i2c->msg->flags & I2C_M_RD)
+		if (i2c->msg->flags & I2C_M_RD) {
 			/* Write SLA+R to Register I2CDAT */
 			writel((((i2c->msg->addr & 0x7f) << 1) | 0x1),
 			       (i2c->regs + DAT));
-		else
+		} else {
 			/* Write SLA+W to Register I2CDAT */
 			writel(((i2c->msg->addr & 0x7f) << 1),
 			       (i2c->regs + DAT));
+		}
 
 		writel(((readl(i2c->regs + CTL0) &
 			 ~(I2C_CTL_STA_SI_AA | I2C_CTL_STO)) |
@@ -388,9 +387,9 @@ static void i2c_ma35d1_irq_master_TRx(struct ma35d1_i2c *i2c,
 			/* send stop */
 			ma35d1_i2c_stop(i2c, 0);
 		}
-	} else if (iicstat == M_TRAN_DATA_NACK)
+	} else if (iicstat == M_TRAN_DATA_NACK) {
 		ma35d1_i2c_stop(i2c, 0);
-	else if ((iicstat == M_TRAN_ADDR_NACK) ||
+	} else if ((iicstat == M_TRAN_ADDR_NACK) ||
 		 (iicstat == M_RECE_ADDR_NACK)) {
 		/* Master Transmit Address NACK */
 		/* 0x20: SLA+W has been transmitted and NACK has been received */
@@ -401,14 +400,15 @@ static void i2c_ma35d1_irq_master_TRx(struct ma35d1_i2c *i2c,
 	} else if (iicstat == M_REPEAT_START) {
 		/* Repeat START has been transmitted and prepare SLA+R */
 
-		if (i2c->msg->flags & I2C_M_RD)
+		if (i2c->msg->flags & I2C_M_RD) {
 			/* Write SLA+R to Register I2CDAT */
 			writel((((i2c->msg->addr & 0x7f) << 1) | 0x1),
 			       (i2c->regs + DAT));
-		else
+		} else {
 			/* Write SLA+W to Register I2CDAT */
 			writel(((i2c->msg->addr & 0x7f) << 1),
 			       (i2c->regs + DAT));
+		}
 
 		writel(((readl(i2c->regs + CTL0) &
 			 ~(I2C_CTL_STA_SI_AA | I2C_CTL_STO)) |
@@ -512,9 +512,9 @@ static irqreturn_t ma35d1_i2c_irq(int irqno, void *dev_id)
 	 */
 
 	if (i2c->slave_mode)
-		I2C_SlaveTRx(i2c, status);
+		i2c_ma35d1_irq_slave_trx(i2c, status);
 	else
-		i2c_ma35d1_irq_master_TRx(i2c, status);
+		i2c_ma35d1_irq_master_trx(i2c, status);
 
 out:
 	return IRQ_HANDLED;
@@ -607,7 +607,7 @@ static int ma35d1_i2c_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs,
 
 		dev_dbg(i2c->dev, "Retrying transmission (%d)\n", retry);
 
-		udelay(100);
+		usleep_range(100, 200);
 	}
 
 	return -EREMOTEIO;
@@ -725,7 +725,7 @@ static int ma35d1_i2c_probe(struct platform_device *pdev)
 
 	/* map the registers */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (res == NULL) {
+	if (!res) {
 		dev_err(&pdev->dev, "cannot find IO resource\n");
 		ret = -ENOENT;
 		goto err_clk;
@@ -777,7 +777,8 @@ static int ma35d1_i2c_probe(struct platform_device *pdev)
 	 * ensure no current IRQs pending
 	 */
 
-	i2c->irq = ret = platform_get_irq(pdev, 0);
+	ret = platform_get_irq(pdev, 0);
+	i2c->irq = ret;
 	if (ret <= 0) {
 		dev_err(&pdev->dev, "cannot find IRQ\n");
 		goto err_clk;
