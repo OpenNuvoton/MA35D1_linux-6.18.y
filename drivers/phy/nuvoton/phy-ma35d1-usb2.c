@@ -46,7 +46,7 @@ static int ma35_usb_phy_power_on(struct phy *phy)
 		 * make sure USB PHY 60 MHz UTMI Interface Clock ready
 		 */
 		ret = regmap_read_poll_timeout(p_phy->sysreg, MA35_SYS_REG_USBPMISCR, val,
-						val & PHY0DEVCKSTB, 10, 1000);
+					       val & PHY0DEVCKSTB, 10, 1000);
 		if (ret == 0)
 			return 0;
 	}
@@ -56,14 +56,14 @@ static int ma35_usb_phy_power_on(struct phy *phy)
 	 * wait until USB PHY0 60 MHz UTMI Interface Clock ready
 	 */
 	regmap_update_bits(p_phy->sysreg, MA35_SYS_REG_USBPMISCR, 0x7, (PHY0POR | PHY0SUSPEND));
-	udelay(20);
+	usleep_range(20, 40);
 
 	/* make USB PHY0 enter operation mode */
 	regmap_update_bits(p_phy->sysreg, MA35_SYS_REG_USBPMISCR, 0x7, PHY0SUSPEND);
 
 	/* make sure USB PHY 60 MHz UTMI Interface Clock ready */
 	ret = regmap_read_poll_timeout(p_phy->sysreg, MA35_SYS_REG_USBPMISCR, val,
-					val & PHY0DEVCKSTB, 10, 1000);
+				       val & PHY0DEVCKSTB, 10, 1000);
 	if (ret == -ETIMEDOUT) {
 		dev_err(p_phy->dev, "Check PHY clock, Timeout: %d\n", ret);
 		clk_disable_unprepare(p_phy->clk);
