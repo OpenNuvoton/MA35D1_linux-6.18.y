@@ -156,7 +156,7 @@ static int wormhole_flush_data(struct mbox_chan *chan, unsigned long timeout)
 			return 0;
 		udelay(1);
 	}
-	printk("%s - timeout!\n", __func__);
+	pr_err("%s - timeout!\n", __func__);
 
 	/* recall TX */
 	iowrite32(TXCTL_CH0RC << wh->ch, priv->base + TXCTL);
@@ -196,7 +196,8 @@ static void wormhole_shutdown(struct mbox_chan *chan)
 		iowrite32(ioread32(priv->base + INTEN) & ~(INTEN_RXTX0_INTEN << wh->ch),
 			  priv->base + INTEN);
 	} else if (wh->ch < DATA_CHANS + GINT_CHANS) {
-		iowrite32(ioread32(priv->base + INTEN) & ~(INTEN_GI0_INTEN << (wh->ch - DATA_CHANS)),
+		iowrite32(ioread32(priv->base + INTEN) &
+			  ~(INTEN_GI0_INTEN << (wh->ch - DATA_CHANS)),
 			  priv->base + INTEN);
 	} else {
 		iowrite32(ioread32(priv->base + INTEN) & ~INTEN_CPSTS_IEN, priv->base + INTEN);
@@ -281,8 +282,8 @@ static int wormhole_probe(struct platform_device *pdev)
 	priv->mbox.txdone_irq = true;
 	priv->mbox.num_chans = DATA_CHANS + GINT_CHANS + STS_CHAN;
 	priv->mbox.chans = devm_kcalloc(dev, priv->mbox.num_chans,
-					     sizeof(*priv->mbox.chans),
-					     GFP_KERNEL);
+					sizeof(*priv->mbox.chans),
+					GFP_KERNEL);
 	if (!priv->mbox.chans) {
 		clk_disable_unprepare(priv->clk);
 		return -ENOMEM;
@@ -299,24 +300,21 @@ static int wormhole_probe(struct platform_device *pdev)
 	}
 
 	for (i = 0; i < priv->mbox.num_chans; i++) {
-
-		wh = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
-
+		wh = devm_kzalloc(dev, sizeof(*wh), GFP_KERNEL);
 		if (!wh) {
 			clk_disable_unprepare(priv->clk);
 			return -ENOMEM;
 		}
 		wh->ch = i;
 		wh->queue = 0;
-//		hrtimer_init(&wh->ack_hrt, CLOCK_MONOTONIC, HRTIMER_MODE_REL); //schung
-		wh->ack_hrt.function = txdone_hrtimer;
+		hrtimer_setup(&wh->ack_hrt, txdone_hrtimer, CLOCK_MONOTONIC,
+			      HRTIMER_MODE_REL);
 		wh->chan = &priv->mbox.chans[i];
 		priv->mbox.chans[i].con_priv = wh;
 	}
 	platform_set_drvdata(pdev, priv);
 
 	return devm_mbox_controller_register(&pdev->dev, &priv->mbox);
-
 }
 
 static void wormhole_remove(struct platform_device *pdev)
@@ -371,7 +369,6 @@ static int wormhole_resume(struct device *dev)
 
 static SIMPLE_DEV_PM_OPS(nvt_wormhole_pm_ops,
 			 wormhole_suspend, wormhole_resume);
-
 
 static const struct of_device_id nvt_wormhole_dt_ids[] = {
 	{ .compatible = "nuvoton,ma35d1-wormhole" },
