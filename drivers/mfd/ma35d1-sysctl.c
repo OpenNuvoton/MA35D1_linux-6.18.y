@@ -17,9 +17,10 @@
 struct reg_protect {
 	int rec;
 	struct regmap *regmap;
-	spinlock_t lock;
-} rp;
+	spinlock_t lock;	/* protects rec and the register unlock sequence */
+};
 
+static struct reg_protect rp;
 
 void ma35d1_reg_unlock(void)
 {
@@ -40,7 +41,6 @@ void ma35d1_reg_unlock(void)
 	}
 
 	spin_unlock_irqrestore(&rp.lock, flags);
-
 }
 EXPORT_SYMBOL(ma35d1_reg_unlock);
 
@@ -53,24 +53,25 @@ void ma35d1_reg_lock(void)
 		regmap_write(rp.regmap, REG_SYS_RLKTZNS, 1);
 
 	spin_unlock_irqrestore(&rp.lock, flags);
-
 }
 EXPORT_SYMBOL(ma35d1_reg_lock);
 
 static int ma35d1_sysctrl_probe(struct platform_device *pdev)
 {
-	if (!pdev->dev.of_node) {
+	struct device_node *np = pdev->dev.of_node;
+
+	if (!np) {
 		dev_err(&pdev->dev, "Device tree node not found\n");
 		return -EINVAL;
 	}
 
 	platform_set_drvdata(pdev, &rp);
 
-	rp.regmap  = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "nuvoton,ma35d1-sys");
+	rp.regmap = syscon_regmap_lookup_by_phandle(np, "nuvoton,ma35d1-sys");
 	if (IS_ERR(rp.regmap))
-		rp.regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "nuvoton,ma35d0-sys");
+		rp.regmap = syscon_regmap_lookup_by_phandle(np, "nuvoton,ma35d0-sys");
 	if (IS_ERR(rp.regmap))
-		rp.regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "nuvoton,ma35h0-sys");
+		rp.regmap = syscon_regmap_lookup_by_phandle(np, "nuvoton,ma35h0-sys");
 	if (IS_ERR(rp.regmap)) {
 		dev_err(&pdev->dev, "Failed to get SYS register base\n");
 		return -ENODEV;
