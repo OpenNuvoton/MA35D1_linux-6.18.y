@@ -33,9 +33,9 @@
 
 static char  ks_miscdev_name[] = MISCDEV_NAME;
 
-static uint16_t au8SRAMCntTbl[21] = {4, 6, 6, 7, 8, 8, 8, 9, 12, 13, 16, 17,
+static u16 sram_cnt_tbl[21] = {4, 6, 6, 7, 8, 8, 8, 9, 12, 13, 16, 17,
 				     18, 0, 0, 0, 32, 48, 64, 96, 128};
-static uint16_t au8OTPCntTbl[7] = {4, 6, 6, 7, 8, 8, 8};
+static u16 otp_cnt_tbl[7] = {4, 6, 6, 7, 8, 8, 8};
 
 #define TEE_ERROR_KS_BUSY		0x00000001
 #define TEE_ERROR_KS_FAIL		0x00000002
@@ -177,6 +177,7 @@ static uint16_t au8OTPCntTbl[7] = {4, 6, 6, 7, 8, 8, 8};
  * @ctx:		OP-TEE context handler.
  * @session_id:		KS TA session identifier.
  * @ks_shm_pool:	Memory pool shared with ma35 key store op-tee pta
+ * @va_shm:		Kernel virtual address of the shared memory pool
  * @miscdev:		Linux misc device data
  */
 struct optee_ks_private {
@@ -222,12 +223,15 @@ static int optee_ks_read(struct optee_ks_private *ks_priv, void __user *arg)
 	param[1].u.memref.shm_offs = 0;
 
 	err = tee_client_invoke_func(ks_priv->ctx, &inv_arg, param);
-	if ((err < 0) || (inv_arg.ret != 0))
+	if (err < 0 || inv_arg.ret != 0)
 		return -EINVAL;
 
 	memcpy((u8 *)r_args.key, ks_priv->va_shm, r_args.word_cnt * 4);
 
-	return copy_to_user(arg, &r_args, sizeof(r_args));
+	if (copy_to_user(arg, &r_args, sizeof(r_args)))
+		return -EFAULT;
+
+	return 0;
 }
 
 static int optee_ks_write_sram(struct optee_ks_private *ks_priv, void __user *arg)
@@ -245,7 +249,7 @@ static int optee_ks_write_sram(struct optee_ks_private *ks_priv, void __user *ar
 	/* Get size index */
 	sidx = ((w_args.meta_data & KS_METADATA_SIZE_Msk) >> KS_METADATA_SIZE_Pos);
 
-	key_wcnt = au8SRAMCntTbl[sidx];
+	key_wcnt = sram_cnt_tbl[sidx];
 
 	memcpy(ks_priv->va_shm, (u8 *)w_args.key, key_wcnt * 4);
 
@@ -269,7 +273,7 @@ static int optee_ks_write_sram(struct optee_ks_private *ks_priv, void __user *ar
 	param[1].u.memref.shm_offs = 0;
 
 	err = tee_client_invoke_func(ks_priv->ctx, &inv_arg, param);
-	if ((err < 0) || (inv_arg.ret != 0)) {
+	if (err < 0 || inv_arg.ret != 0) {
 		dev_err(ks_priv->dev, "PTA_CMD_KS_WRITE invoke err: %x\n",
 			inv_arg.ret);
 		return -EINVAL;
@@ -296,7 +300,7 @@ static int optee_ks_write_otp(struct optee_ks_private *ks_priv, void __user *arg
 	if (sidx >= 7)
 		return -EINVAL;
 
-	key_wcnt = au8OTPCntTbl[sidx];
+	key_wcnt = otp_cnt_tbl[sidx];
 
 	memcpy(ks_priv->va_shm, (u8 *)w_args.key, key_wcnt * 4);
 
@@ -320,7 +324,7 @@ static int optee_ks_write_otp(struct optee_ks_private *ks_priv, void __user *arg
 	param[1].u.memref.shm_offs = 0;
 
 	err = tee_client_invoke_func(ks_priv->ctx, &inv_arg, param);
-	if ((err < 0) || (inv_arg.ret != 0)) {
+	if (err < 0 || inv_arg.ret != 0) {
 		dev_err(ks_priv->dev, "PTA_CMD_KS_WRITE invoke err: %x\n",
 			inv_arg.ret);
 		return -EINVAL;
@@ -354,7 +358,7 @@ static int optee_ks_erase(struct optee_ks_private *ks_priv, void __user *arg)
 	param[0].u.value.b = k_args.key_idx;
 
 	ret = tee_client_invoke_func(ks_priv->ctx, &inv_arg, param);
-	if ((ret < 0) || (inv_arg.ret != 0)) {
+	if (ret < 0 || inv_arg.ret != 0) {
 		dev_err(ks_priv->dev, "PTA_CMD_KS_ERASE invoke err: %x\n",
 			inv_arg.ret);
 		return -EINVAL;
@@ -377,7 +381,7 @@ static int optee_ks_erase_all(struct optee_ks_private *ks_priv)
 	inv_arg.num_params = 4;
 
 	ret = tee_client_invoke_func(ks_priv->ctx, &inv_arg, param);
-	if ((ret < 0) || (inv_arg.ret != 0)) {
+	if (ret < 0 || inv_arg.ret != 0) {
 		dev_err(ks_priv->dev, "PTA_CMD_KS_ERASE_ALL invoke err: %x\n",
 			inv_arg.ret);
 		return -EINVAL;
@@ -412,7 +416,7 @@ static int optee_ks_revoke(struct optee_ks_private *ks_priv, void __user *arg)
 	param[0].u.value.b = k_args.key_idx;
 
 	ret = tee_client_invoke_func(ks_priv->ctx, &inv_arg, param);
-	if ((ret < 0) || (inv_arg.ret != 0)) {
+	if (ret < 0 || inv_arg.ret != 0) {
 		dev_err(ks_priv->dev, "PTA_CMD_KS_REVOKE invoke err: %x\n",
 			inv_arg.ret);
 		return -EINVAL;
@@ -439,7 +443,7 @@ static int optee_ks_remain(struct optee_ks_private *ks_priv)
 	param[0].attr = TEE_IOCTL_PARAM_ATTR_TYPE_VALUE_OUTPUT;
 
 	ret = tee_client_invoke_func(ks_priv->ctx, &inv_arg, param);
-	if ((ret < 0) || (inv_arg.ret != 0)) {
+	if (ret < 0 || inv_arg.ret != 0) {
 		dev_err(ks_priv->dev, "PTA_CMD_KS_REMAIN invoke err: %x\n",
 			inv_arg.ret);
 		return -EINVAL;
@@ -483,7 +487,7 @@ static int optee_ks_read_otp(struct optee_ks_private *ks_priv, void __user *arg)
 	param[1].u.memref.shm_offs = 0;
 
 	ret = tee_client_invoke_func(ks_priv->ctx, &inv_arg, param);
-	if ((ret < 0) || (inv_arg.ret != 0)) {
+	if (ret < 0 || inv_arg.ret != 0) {
 		dev_err(ks_priv->dev, "PTA_CMD_OTP_READ invoke err: %x\n",
 			inv_arg.ret);
 		return -EINVAL;
@@ -491,7 +495,10 @@ static int optee_ks_read_otp(struct optee_ks_private *ks_priv, void __user *arg)
 
 	memcpy((u8 *)r_args.key, ks_priv->va_shm, r_args.word_cnt * 4);
 
-	return copy_to_user(arg, &r_args, sizeof(r_args));
+	if (copy_to_user(arg, &r_args, sizeof(r_args)))
+		return -EFAULT;
+
+	return 0;
 }
 
 static int optee_ks_program_otp(struct optee_ks_private *ks_priv,
@@ -551,7 +558,7 @@ static int optee_ks_dev_open(struct inode *iptr, struct file *fptr)
 	inv_arg.num_params = 4;
 
 	ret = tee_client_invoke_func(ks_priv->ctx, &inv_arg, param);
-	if ((ret < 0) || (inv_arg.ret != 0)) {
+	if (ret < 0 || inv_arg.ret != 0) {
 		dev_err(ks_priv->dev, "PTA_CMD_KS_INIT invoke err: %x\n",
 			inv_arg.ret);
 		return -EINVAL;
@@ -565,7 +572,7 @@ static int optee_ks_dev_release(struct inode *iptr, struct file *fptr)
 }
 
 static long optee_ks_dev_ioctl(struct file *fptr, unsigned int cmd,
-				 unsigned long data)
+			       unsigned long data)
 {
 	struct optee_ks_private  *ks_priv;
 	char __user *argp = (char __user *)data;
@@ -702,7 +709,7 @@ static int optee_ks_probe(struct device *dev)
 		goto out_sess;
 	}
 
-	printk("ma35 kstore-optee initialized.\n");
+	pr_info("ma35 kstore-optee initialized.\n");
 	return 0;
 
 out_sess:

@@ -41,9 +41,9 @@ struct ma35_ks_dev {
 
 static char  ks_miscdev_name[] = MISCDEV_NAME;
 
-static uint16_t au8SRAMCntTbl[21] = {4, 6, 6, 7, 8, 8, 8, 9, 12, 13, 16, 17,
+static u16 sram_cnt_tbl[21] = {4, 6, 6, 7, 8, 8, 8, 9, 12, 13, 16, 17,
 				     18, 0, 0, 0, 32, 48, 64, 96, 128};
-static uint16_t au8OTPCntTbl[7] = {4, 6, 6, 7, 8, 8, 8};
+static u16 otp_cnt_tbl[7] = {4, 6, 6, 7, 8, 8, 8};
 
 static inline u32  ma35_read_reg(struct ma35_ks_dev *ks_dev, u32 offset)
 {
@@ -114,7 +114,7 @@ static int ma35_ks_read(struct ma35_ks_dev *ks_dev, void __user *arg)
 		if (cnt > 8)
 			cnt = 8;
 		for (i = 0; i < cnt; i++)
-			r_args.key[offset+i] = ma35_read_reg(ks_dev, KS_KEY(i));
+			r_args.key[offset + i] = ma35_read_reg(ks_dev, KS_KEY(i));
 
 		cont_msk = KS_CTL_CONT;
 		remain_cnt -= 8;
@@ -156,7 +156,7 @@ static int ma35_ks_write_sram(struct ma35_ks_dev *ks_dev, void __user *arg)
 
 	/* Get key size by indexing to size table */
 	i = ((w_args.meta_data & KS_METADATA_SIZE_Msk) >> KS_METADATA_SIZE_Pos);
-	remain_cnt = au8SRAMCntTbl[i];
+	remain_cnt = sram_cnt_tbl[i];
 
 	/* Invalid key length */
 	if (remain_cnt == 0) {
@@ -173,9 +173,8 @@ static int ma35_ks_write_sram(struct ma35_ks_dev *ks_dev, void __user *arg)
 		cnt = remain_cnt;
 		if (cnt > 8)
 			cnt = 8;
-		for (i = 0; i < cnt; i++) {
+		for (i = 0; i < cnt; i++)
 			ma35_write_reg(ks_dev, KS_KEY(i), w_args.key[offset + i]);
-		}
 
 		/* Clear Status */
 		ma35_write_reg(ks_dev, KS_STS, KS_STS_EIF | KS_STS_IF);
@@ -229,7 +228,7 @@ static int ma35_ks_write_otp(struct ma35_ks_dev *ks_dev, void __user *arg)
 	if (sidx >= 7)
 		return -1;
 
-	remain_cnt = au8OTPCntTbl[sidx];
+	remain_cnt = otp_cnt_tbl[sidx];
 
 	/* Clear error flag */
 	ma35_write_reg(ks_dev, KS_STS, KS_STS_EIF);
@@ -388,7 +387,7 @@ static int ks_dev_open(struct inode *iptr, struct file *fptr)
 	/* Start Key Store Initial */
 	ma35_write_reg(ks_dev, KS_CTL, KS_CTL_INIT | KS_CTL_START);
 
-	/* Waiting for KeyStore initilization done */
+	/* Waiting for KeyStore initialization done */
 	timeout = jiffies + msecs_to_jiffies(KS_BUSY_TIMEOUT);
 	while ((ma35_read_reg(ks_dev, KS_STS) & KS_STS_INITDONE) == 0) {
 		if (time_after(jiffies, timeout))
@@ -497,7 +496,7 @@ static int ma35_ks_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	printk("ma35 kstore initialized.\n");
+	pr_info("ma35 kstore initialized.\n");
 	return 0;
 }
 
