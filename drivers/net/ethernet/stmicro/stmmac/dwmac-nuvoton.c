@@ -141,9 +141,9 @@ static int nvt_gmac_probe(struct platform_device *pdev)
 	struct stmmac_resources stmmac_res;
 	struct nvt_priv_data *priv_data;
 	const struct nvt_dev_info *data;
+	const struct of_device_id *match;
 	int ret;
 
-	const struct of_device_id *match;
 	match = of_match_device(nvt_dwmac_match, &pdev->dev);
 	if (!match)
 		return -EINVAL;
