@@ -52,38 +52,65 @@
 #define MA35_GP_MODE_OUTPUT		0x1
 #define MA35_GP_MODE_OPEN_DRAIN		0x2
 #define MA35_GP_MODE_QUASI		0x3
-#define MA35_GP_MODE_MASK(n)		GENMASK(n * 2 + 1, n * 2)
-
-#define MA35_GP_SLEWCTL_MASK(n)		GENMASK(n * 2 + 1, n * 2)
 
 /* GPIO pull-up and pull-down selection control */
 #define MA35_GP_PUSEL_DISABLE		0x0
 #define MA35_GP_PUSEL_PULL_UP		0x1
 #define MA35_GP_PUSEL_PULL_DOWN		0x2
-#define MA35_GP_PUSEL_MASK(n)		GENMASK(n * 2 + 1, n * 2)
 
 /*
  * The MA35_GP_REG_INTEN bits 0 ~ 15 control low-level or falling edge trigger,
  * while bits 16 ~ 31 control high-level or rising edge trigger.
  */
 #define MA35_GP_INTEN_L(n)		BIT(n)
-#define MA35_GP_INTEN_H(n)		BIT(n + 16)
-#define MA35_GP_INTEN_BOTH(n)		(MA35_GP_INTEN_H(n) | MA35_GP_INTEN_L(n))
+#define MA35_GP_INTEN_H(n)		BIT((n) + 16)
 
 /*
  * The MA35_GP_REG_DSL register controls ports 0 to 7, while the MA35_GP_REG_DSH
  * register controls ports 8 to 15. Each port occupies a width of 4 bits, with 3
  * bits being effective.
  */
-#define MA35_GP_DS_REG(n)		(n < 8 ? MA35_GP_REG_DSL : MA35_GP_REG_DSH)
-#define MA35_GP_DS_MASK(n)		GENMASK((n % 8) * 4 + 3, (n % 8) * 4)
+#define MA35_GP_DS_REG(n)		((n) < 8 ? MA35_GP_REG_DSL : MA35_GP_REG_DSH)
 
 #define MVOLT_1800			0
 #define MVOLT_3300			1
 
+/* Per-pin register field masks */
+static inline u32 ma35_gp_mode_mask(unsigned int n)
+{
+	return GENMASK(n * 2 + 1, n * 2);
+}
+
+static inline u32 ma35_gp_slewctl_mask(unsigned int n)
+{
+	return GENMASK(n * 2 + 1, n * 2);
+}
+
+static inline u32 ma35_gp_pusel_mask(unsigned int n)
+{
+	return GENMASK(n * 2 + 1, n * 2);
+}
+
+static inline u32 ma35_gp_inten_both(unsigned int n)
+{
+	return MA35_GP_INTEN_H(n) | MA35_GP_INTEN_L(n);
+}
+
+static inline u32 ma35_gp_ds_mask(unsigned int n)
+{
+	return GENMASK((n % 8) * 4 + 3, (n % 8) * 4);
+}
+
 /* Non-constant mask variant of FIELD_GET() and FIELD_PREP() */
-#define field_get(_mask, _reg)	(((_reg) & (_mask)) >> (ffs(_mask) - 1))
-#define field_prep(_mask, _val)	(((_val) << (ffs(_mask) - 1)) & (_mask))
+static inline u32 ma35_field_get(u32 mask, u32 reg)
+{
+	return (reg & mask) >> (ffs(mask) - 1);
+}
+
+static inline u32 ma35_field_prep(u32 mask, u32 val)
+{
+	return (val << (ffs(mask) - 1)) & mask;
+}
 
 static const char * const gpio_group_name[] = {
 	"gpioa", "gpiob", "gpioc", "gpiod", "gpioe", "gpiof", "gpiog",
@@ -307,8 +334,8 @@ static void ma35_gpio_set_mode(void __iomem *reg_mode, unsigned int gpio, u32 mo
 {
 	u32 regval = readl(reg_mode);
 
-	regval &= ~MA35_GP_MODE_MASK(gpio);
-	regval |= field_prep(MA35_GP_MODE_MASK(gpio), mode);
+	regval &= ~ma35_gp_mode_mask(gpio);
+	regval |= ma35_field_prep(ma35_gp_mode_mask(gpio), mode);
 
 	writel(regval, reg_mode);
 }
@@ -317,7 +344,7 @@ static u32 ma35_gpio_get_mode(void __iomem *reg_mode, unsigned int gpio)
 {
 	u32 regval = readl(reg_mode);
 
-	return field_get(MA35_GP_MODE_MASK(gpio), regval);
+	return ma35_field_get(ma35_gp_mode_mask(gpio), regval);
 }
 
 static int ma35_gpio_core_direction_in(struct gpio_chip *gc, unsigned int gpio)
@@ -325,9 +352,8 @@ static int ma35_gpio_core_direction_in(struct gpio_chip *gc, unsigned int gpio)
 	struct ma35_pin_bank *bank = gpiochip_get_data(gc);
 	void __iomem *reg_mode = bank->reg_base + MA35_GP_REG_MODE;
 
-	guard(raw_spinlock_irqsave)(&ma35_lock);
-
-	ma35_gpio_set_mode(reg_mode, gpio, MA35_GP_MODE_INPUT);
+	scoped_guard(raw_spinlock_irqsave, &ma35_lock)
+		ma35_gpio_set_mode(reg_mode, gpio, MA35_GP_MODE_INPUT);
 
 	return 0;
 }
@@ -339,16 +365,16 @@ static int ma35_gpio_core_direction_out(struct gpio_chip *gc, unsigned int gpio,
 	void __iomem *reg_mode = bank->reg_base + MA35_GP_REG_MODE;
 	unsigned int regval;
 
-	guard(raw_spinlock_irqsave)(&ma35_lock);
+	scoped_guard(raw_spinlock_irqsave, &ma35_lock) {
+		regval = readl(reg_dout);
+		if (val)
+			regval |= BIT(gpio);
+		else
+			regval &= ~BIT(gpio);
+		writel(regval, reg_dout);
 
-	regval = readl(reg_dout);
-	if (val)
-		regval |= BIT(gpio);
-	else
-		regval &= ~BIT(gpio);
-	writel(regval, reg_dout);
-
-	ma35_gpio_set_mode(reg_mode, gpio, MA35_GP_MODE_OUTPUT);
+		ma35_gpio_set_mode(reg_mode, gpio, MA35_GP_MODE_OUTPUT);
+	}
 
 	return 0;
 }
@@ -417,7 +443,7 @@ static void ma35_irq_gpio_mask(struct irq_data *d)
 
 	regval = readl(reg_ien);
 
-	regval &= ~MA35_GP_INTEN_BOTH(hwirq);
+	regval &= ~ma35_gp_inten_both(hwirq);
 
 	writel(regval, reg_ien);
 }
@@ -435,9 +461,9 @@ static void ma35_irq_gpio_unmask(struct irq_data *d)
 	regval &= ~BIT(hwirq);
 	writel(regval | bval, reg_itype);
 
-	bval = bank->irqinten & MA35_GP_INTEN_BOTH(hwirq);
+	bval = bank->irqinten & ma35_gp_inten_both(hwirq);
 	regval = readl(reg_ien);
-	regval &= ~MA35_GP_INTEN_BOTH(hwirq);
+	regval &= ~ma35_gp_inten_both(hwirq);
 	writel(regval | bval, reg_ien);
 }
 
@@ -450,7 +476,7 @@ static int ma35_irq_irqtype(struct irq_data *d, unsigned int type)
 	case IRQ_TYPE_EDGE_BOTH:
 		irq_set_handler_locked(d, handle_edge_irq);
 		bank->irqtype &= ~BIT(hwirq);
-		bank->irqinten |= MA35_GP_INTEN_BOTH(hwirq);
+		bank->irqinten |= ma35_gp_inten_both(hwirq);
 		break;
 	case IRQ_TYPE_EDGE_RISING:
 	case IRQ_TYPE_LEVEL_HIGH:
@@ -626,7 +652,7 @@ static int ma35_pinconf_set_pull(struct ma35_pinctrl *npctl, unsigned int pin,
 	base = npctl->ctrl->pin_banks[group_num].reg_base;
 
 	regval = readl(base + MA35_GP_REG_PUSEL);
-	regval &= ~MA35_GP_PUSEL_MASK(port);
+	regval &= ~ma35_gp_pusel_mask(port);
 
 	switch (pull_up) {
 	case PIN_CONFIG_BIAS_PULL_UP:
@@ -642,7 +668,7 @@ static int ma35_pinconf_set_pull(struct ma35_pinctrl *npctl, unsigned int pin,
 		break;
 	}
 
-	regval |= field_prep(MA35_GP_PUSEL_MASK(port), pull_sel);
+	regval |= ma35_field_prep(ma35_gp_pusel_mask(port), pull_sel);
 	writel(regval, base + MA35_GP_REG_PUSEL);
 
 	return 0;
@@ -675,7 +701,7 @@ static int ma35_pinconf_get_pull(struct ma35_pinctrl *npctl, unsigned int pin)
 
 	regval = readl(base + MA35_GP_REG_PUSEL);
 
-	pull_sel = field_get(MA35_GP_PUSEL_MASK(port), regval);
+	pull_sel = ma35_field_get(ma35_gp_pusel_mask(port), regval);
 
 	switch (pull_sel) {
 	case MA35_GP_PUSEL_PULL_UP:
@@ -728,7 +754,7 @@ static int ma35_pinconf_set_power_source(struct ma35_pinctrl *npctl,
 	void __iomem *base;
 	u32 regval;
 
-	if ((arg != MVOLT_1800) && (arg != MVOLT_3300))
+	if (arg != MVOLT_1800 && arg != MVOLT_3300)
 		return -EINVAL;
 
 	ma35_gpio_cla_port(pin, &group_num, &port);
@@ -757,7 +783,7 @@ static int ma35_pinconf_get_drive_strength(struct ma35_pinctrl *npctl, unsigned 
 	base = npctl->ctrl->pin_banks[group_num].reg_base;
 
 	regval = readl(base + MA35_GP_DS_REG(port));
-	ds_val = field_get(MA35_GP_DS_MASK(port), regval);
+	ds_val = ma35_field_get(ma35_gp_ds_mask(port), regval);
 
 	if (ma35_pinconf_get_power_source(npctl, pin) == MVOLT_1800)
 		*strength = ds_1800mv_tbl[ds_val];
@@ -797,8 +823,8 @@ static int ma35_pinconf_set_drive_strength(struct ma35_pinctrl *npctl, unsigned 
 	base = npctl->ctrl->pin_banks[group_num].reg_base;
 
 	regval = readl(base + MA35_GP_DS_REG(port));
-	regval &= ~MA35_GP_DS_MASK(port);
-	regval |= field_prep(MA35_GP_DS_MASK(port), ds_val);
+	regval &= ~ma35_gp_ds_mask(port);
+	regval |= ma35_field_prep(ma35_gp_ds_mask(port), ds_val);
 
 	writel(regval, base + MA35_GP_DS_REG(port));
 
@@ -851,7 +877,7 @@ static int ma35_pinconf_get_slew_rate(struct ma35_pinctrl *npctl, unsigned int p
 
 	regval = readl(base + MA35_GP_REG_SLEWCTL);
 
-	return field_get(MA35_GP_SLEWCTL_MASK(port), regval);
+	return ma35_field_get(ma35_gp_slewctl_mask(port), regval);
 }
 
 static int ma35_pinconf_set_slew_rate(struct ma35_pinctrl *npctl, unsigned int pin, int rate)
@@ -864,8 +890,8 @@ static int ma35_pinconf_set_slew_rate(struct ma35_pinctrl *npctl, unsigned int p
 	base = npctl->ctrl->pin_banks[group_num].reg_base;
 
 	regval = readl(base + MA35_GP_REG_SLEWCTL);
-	regval &= ~MA35_GP_SLEWCTL_MASK(port);
-	regval |= field_prep(MA35_GP_SLEWCTL_MASK(port), rate);
+	regval &= ~ma35_gp_slewctl_mask(port);
+	regval |= ma35_field_prep(ma35_gp_slewctl_mask(port), rate);
 
 	writel(regval, base + MA35_GP_REG_SLEWCTL);
 

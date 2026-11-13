@@ -64,10 +64,12 @@
 #define GPIO_PUSEL_PULL_DOWN	0x2
 #define GPIO_PUSEL_MASK	0x3
 
-/* Each pin data input/output is mapped throught by address mapping */
-#define GPIO_PIN_DATA(base, pin) (*((unsigned int *)((base+0x800) + ((pin)<<2))))
+/* Each pin data input/output is mapped through by address mapping */
+#define GPIO_PIN_DATA_BASE	0x800
+#define GPIO_INTTYPE		0x18
+#define GPIO_INTEN		0x1C
 
-char *gpio_port_name[] = {
+static char *gpio_port_name[] = {
 	"gpioa", "gpiob", "gpioc", "gpiod", "gpioe", "gpiof", "gpiog", "gpioh",
 	"gpioi", "gpioj", "gpiok", "gpiol", "gpiom", "gpion"
 };
@@ -108,6 +110,7 @@ struct nvt_pin_bank {
 	struct irq_chip irqc;
 	struct regmap *regmap;
 	struct device *dev;
+	/* protects read-modify-write of the GPIO registers of this bank */
 	spinlock_t lock;
 };
 
@@ -144,8 +147,8 @@ static int nvt_get_groups_count(struct pinctrl_dev *pctldev)
 	return npctl->ngroups;
 }
 
-static inline const struct nvt_pin_group *nvt_pinctrl_find_group_by_name(
-		const struct nvt_pinctrl *npctl, const char *name)
+static inline const struct nvt_pin_group *
+nvt_pinctrl_find_group_by_name(const struct nvt_pinctrl *npctl, const char *name)
 {
 	int i;
 
@@ -158,7 +161,7 @@ static inline const struct nvt_pin_group *nvt_pinctrl_find_group_by_name(
 }
 
 static int nvt_get_group_pins(struct pinctrl_dev *pctldev, unsigned int selector,
-				const unsigned int **pins, unsigned int *npins)
+			      const unsigned int **pins, unsigned int *npins)
 {
 	struct nvt_pinctrl *npctl = pinctrl_dev_get_drvdata(pctldev);
 
@@ -220,7 +223,7 @@ static int nvt_pinctrl_dt_node_to_map_func(struct pinctrl_dev *pctldev, struct d
 }
 
 static void nvt_dt_free_map(struct pinctrl_dev *pctldev, struct pinctrl_map *map,
-			     unsigned int num_maps)
+			    unsigned int num_maps)
 {
 	devm_kfree(pctldev->dev, map);
 }
@@ -259,7 +262,7 @@ static int nvt_pinmux_get_func_groups(struct pinctrl_dev *pctldev, unsigned int 
 }
 
 static int nvt_pinmux_set_mux(struct pinctrl_dev *pctldev, unsigned int selector,
-				unsigned int group)
+			      unsigned int group)
 {
 	struct nvt_pinctrl *npctl = pinctrl_dev_get_drvdata(pctldev);
 	struct nvt_pin_group *grp = &npctl->groups[group];
@@ -277,7 +280,7 @@ static int nvt_pinmux_set_mux(struct pinctrl_dev *pctldev, unsigned int selector
 	return 0;
 }
 
-const struct pinmux_ops nvt_pmx_ops = {
+static const struct pinmux_ops nvt_pmx_ops = {
 	.get_functions_count = nvt_pinmux_get_func_count,
 	.get_function_name = nvt_pinmux_get_func_name,
 	.get_function_groups = nvt_pinmux_get_func_groups,
@@ -295,9 +298,9 @@ static int nvt_gpio_core_direction_out(struct gpio_chip *gc, unsigned int gpio_n
 	spin_lock_irqsave(&bank->lock, flags);
 	value = readl(base + GPIO_DOUT);
 	if (val)
-		writel(value|(1<<gpio_num), base + GPIO_DOUT);
+		writel(value | BIT(gpio_num), base + GPIO_DOUT);
 	else
-		writel(value&~(1<<gpio_num), base + GPIO_DOUT);
+		writel(value & ~BIT(gpio_num), base + GPIO_DOUT);
 
 	value = readl(base + GPIO_MODE);
 	value &= ~GPIO_SET_MODE(gpio_num, GPIO_MODE_QUASI);
@@ -313,7 +316,7 @@ static int nvt_gpio_core_set(struct gpio_chip *gc, unsigned int gpio_num, int va
 	struct nvt_pin_bank *bank = gpiochip_get_data(gc);
 	void __iomem *base = bank->reg_base;
 
-	GPIO_PIN_DATA(base, gpio_num) = val;
+	writel(val, base + GPIO_PIN_DATA_BASE + (gpio_num << 2));
 
 	return 0;
 }
@@ -323,7 +326,7 @@ static int nvt_gpio_core_get(struct gpio_chip *gc, unsigned int gpio_num)
 	struct nvt_pin_bank *bank = gpiochip_get_data(gc);
 	void __iomem *base = bank->reg_base;
 
-	return GPIO_PIN_DATA(base, gpio_num);
+	return readl(base + GPIO_PIN_DATA_BASE + (gpio_num << 2));
 }
 
 static int nvt_gpio_core_direction_in(struct gpio_chip *gc, unsigned int gpio_num)
@@ -346,10 +349,9 @@ static int nvt_gpio_core_direction_in(struct gpio_chip *gc, unsigned int gpio_nu
 static int nvt_gpio_core_to_request(struct gpio_chip *gc, unsigned int gpio_num)
 {
 	unsigned int reg, reg_offset;
-	unsigned int num, value;
+	unsigned int num;
 	struct nvt_pin_bank *bank = gpiochip_get_data(gc);
 
-	regmap_read(bank->regmap, MFP_BASE+(bank->bank_num * 0x08), &reg);
 	reg_offset = bank->bank_num * 0x08;
 	num = gpio_num;
 
@@ -358,120 +360,89 @@ static int nvt_gpio_core_to_request(struct gpio_chip *gc, unsigned int gpio_num)
 		reg_offset = reg_offset + 0x04;
 	}
 
-	regmap_read(bank->regmap, MFP_BASE+reg_offset, &reg);
-	value = (reg & (0xf<<(num*4)))>>(num*4);
-
-	regmap_write(bank->regmap, MFP_BASE+reg_offset, reg & ~(0xf<<(num*4)));
+	regmap_read(bank->regmap, MFP_BASE + reg_offset, &reg);
+	regmap_write(bank->regmap, MFP_BASE + reg_offset, reg & ~(0xf << (num * 4)));
 
 	return 0;
 }
 
+static void nvt_gpio_reg_update(struct nvt_pin_bank *bank, unsigned int off, u32 clr, u32 set)
+{
+	void __iomem *reg = bank->reg_base + off;
+
+	writel((readl(reg) & ~clr) | set, reg);
+}
+
 static void nvt_irq_gpio_mask(struct irq_data *d)
 {
-	unsigned int num = (d->hwirq);
+	unsigned int num = d->hwirq;
 	struct nvt_pin_bank *bank = gpiochip_get_data(irq_data_get_irq_chip_data(d));
 
-	writel(readl((unsigned int *)(bank->reg_base + 0x1C)) &
-		     ~(0x1 << (num + 16)),
-		     (unsigned int *)(bank->reg_base + 0x1C));
-	writel(readl((unsigned int *)(bank->reg_base + 0x1C)) &
-		     ~(0x1 << num), (unsigned int *)(bank->reg_base + 0x1C));
+	nvt_gpio_reg_update(bank, GPIO_INTEN, BIT(num + 16), 0);
+	nvt_gpio_reg_update(bank, GPIO_INTEN, BIT(num), 0);
 }
 
 static void nvt_irq_gpio_unmask(struct irq_data *d)
 {
-	unsigned int num = (d->hwirq);
+	unsigned int num = d->hwirq;
 	struct nvt_pin_bank *bank = gpiochip_get_data(irq_data_get_irq_chip_data(d));
-	unsigned int tmp = bank->irqtype & (0x1 << (num));
 
-	writel(readl((unsigned int *)(bank->reg_base + 0x18)) | tmp,
-		     (unsigned int *)(bank->reg_base + 0x18));
-	tmp = bank->irqinten & (0x1 << (num + 16));
-	writel(readl((unsigned int *)(bank->reg_base + 0x1C)) | tmp,
-		     (unsigned int *)(bank->reg_base + 0x1C));
-	tmp = bank->irqinten & (0x1 << num);
-	writel(readl((unsigned int *)(bank->reg_base + 0x1C)) | tmp,
-		     (unsigned int *)(bank->reg_base + 0x1C));
+	nvt_gpio_reg_update(bank, GPIO_INTTYPE, 0, bank->irqtype & BIT(num));
+	nvt_gpio_reg_update(bank, GPIO_INTEN, 0, bank->irqinten & BIT(num + 16));
+	nvt_gpio_reg_update(bank, GPIO_INTEN, 0, bank->irqinten & BIT(num));
 }
 
 static int nvt_irq_irqtype(struct irq_data *d, unsigned int type)
 {
-	unsigned int num = (d->hwirq);
+	unsigned int num = d->hwirq;
 	struct nvt_pin_bank *bank = gpiochip_get_data(irq_data_get_irq_chip_data(d));
 
 	if (type & IRQ_TYPE_LEVEL_MASK) {
-		writel(readl((unsigned int *)(bank->reg_base + 0x18)) |
-			(0x1 << num),
-			(unsigned int *)(bank->reg_base + 0x18));
-		writel(readl((unsigned int *)(bank->reg_base +
-			0x1C)) & ~((0x1 << num) | ((0x1<<num)<<16)),
-			(unsigned int *)(bank->reg_base + 0x1C));
-		bank->irqtype |= (0x1 << num);
-		bank->irqinten &= ~(0x1 << num);
-		bank->irqinten &= ~(0x1 << (num + 16));
+		nvt_gpio_reg_update(bank, GPIO_INTTYPE, 0, BIT(num));
+		nvt_gpio_reg_update(bank, GPIO_INTEN, BIT(num) | BIT(num + 16), 0);
+		bank->irqtype |= BIT(num);
+		bank->irqinten &= ~BIT(num);
+		bank->irqinten &= ~BIT(num + 16);
 
 		if (type == IRQ_TYPE_LEVEL_HIGH) {
-			writel(readl((unsigned int *)(bank->reg_base + 0x1C)) |
-				     ((0x1 << num) << 16),
-				     (unsigned int *)(bank->reg_base + 0x1C));
-			bank->irqinten |= (0x1 << (num + 16));
+			nvt_gpio_reg_update(bank, GPIO_INTEN, 0, BIT(num + 16));
+			bank->irqinten |= BIT(num + 16);
 			return 0;
 		}
 
 		if (type == IRQ_TYPE_LEVEL_LOW) {
-			writel(readl((unsigned int *)(bank->reg_base + 0x1C)) |
-				(0x1 << num),
-				(unsigned int *)(bank->reg_base + 0x1C));
-			bank->irqinten |= (0x1 << num);
+			nvt_gpio_reg_update(bank, GPIO_INTEN, 0, BIT(num));
+			bank->irqinten |= BIT(num);
 
 			return 0;
 		}
-
 	} else {
-		writel(readl((unsigned int *)(bank->reg_base + 0x18)) &
-			~(0x1 << num),
-			(unsigned int *)(bank->reg_base + 0x18));
-		bank->irqtype &= ~(0x1 << num);
+		nvt_gpio_reg_update(bank, GPIO_INTTYPE, BIT(num), 0);
+		bank->irqtype &= ~BIT(num);
 
 		if (type & IRQ_TYPE_EDGE_RISING) {
-			writel(readl((unsigned int *)(bank->reg_base +
-				0x1C)) | ((0x1 << num) << 16),
-				(unsigned int *)(bank->reg_base + 0x1C));
-			bank->irqinten |= (0x1 << (num + 16));
-
+			nvt_gpio_reg_update(bank, GPIO_INTEN, 0, BIT(num + 16));
+			bank->irqinten |= BIT(num + 16);
 		} else {
-			writel(readl((unsigned int *)(bank->reg_base +
-				0x1C)) & ~((0x1 << num) << 16),
-				(unsigned int *)(bank->reg_base + 0x1C));
-			bank->irqinten &= ~(0x1 << (num + 16));
+			nvt_gpio_reg_update(bank, GPIO_INTEN, BIT(num + 16), 0);
+			bank->irqinten &= ~BIT(num + 16);
 		}
 
 		if (type & IRQ_TYPE_EDGE_FALLING) {
-			writel(readl
-				     ((unsigned int *)(bank->reg_base +
-							0x1C)) | (0x1 << num),
-				     (unsigned int *)(bank->reg_base + 0x1C));
-			bank->irqinten |= (0x1 << num);
-
+			nvt_gpio_reg_update(bank, GPIO_INTEN, 0, BIT(num));
+			bank->irqinten |= BIT(num);
 		} else {
-			writel(readl
-				     ((unsigned int *)(bank->reg_base +
-							0x1C)) & ~(0x1 << num),
-				     (unsigned int *)(bank->reg_base + 0x1C));
-			bank->irqinten &= ~(0x1 << num);
+			nvt_gpio_reg_update(bank, GPIO_INTEN, BIT(num), 0);
+			bank->irqinten &= ~BIT(num);
 		}
 	}
 
 	if (type == IRQ_TYPE_PROBE) {
-		writel(readl((unsigned int *)(bank->reg_base +
-			0x18)) & ~(0x1 << num),
-			(unsigned int *)(bank->reg_base + 0x18));
-		writel(readl((unsigned int *)(bank->reg_base +
-			0x1C)) | (0x1 << num) | ((0x1 << num) << 16),
-			(unsigned int *)(bank->reg_base + 0x1C));
-		bank->irqtype &= ~(0x1 << num);
-		bank->irqinten |= (0x1 << num);
-		bank->irqinten |= (0x1 << (num + 16));
+		nvt_gpio_reg_update(bank, GPIO_INTTYPE, BIT(num), 0);
+		nvt_gpio_reg_update(bank, GPIO_INTEN, 0, BIT(num) | BIT(num + 16));
+		bank->irqtype &= ~BIT(num);
+		bank->irqinten |= BIT(num);
+		bank->irqinten |= BIT(num + 16);
 
 		return 0;
 	}
@@ -552,7 +523,7 @@ static int nvt_gpiolib_register(struct platform_device *pdev, struct nvt_pinctrl
 			girq->parent_handler = NULL;
 			girq->num_parents = 1;
 			girq->parents = devm_kcalloc(&pdev->dev, 1, sizeof(*girq->parents),
-					GFP_KERNEL);
+						     GFP_KERNEL);
 			if (!girq->parents)
 				return -ENOMEM;
 			girq->parents[0] = bank->irq;
@@ -560,7 +531,7 @@ static int nvt_gpiolib_register(struct platform_device *pdev, struct nvt_pinctrl
 			girq->handler = handle_level_irq;
 
 			ret = devm_request_irq(bank->dev, bank->irq, nvt_irq_demux_intgroup,
-						   IRQF_SHARED, bank->name, &bank->chip);
+					       IRQF_SHARED, bank->name, &bank->chip);
 			if (ret) {
 				dev_err(&pdev->dev, "Unable to request IRQ%d: %d\n",
 					bank->irq, ret);
@@ -622,7 +593,8 @@ static int nvt_pinctrl_get_soc_data(struct nvt_pinctrl *pctl, struct platform_de
 
 	ctrl = pctl->ctrl;
 	ctrl->nr_banks = MAX_GPIO_PORT;
-	ctrl->pin_banks = devm_kcalloc(&pdev->dev, ctrl->nr_banks, sizeof(*ctrl->pin_banks), GFP_KERNEL);
+	ctrl->pin_banks = devm_kcalloc(&pdev->dev, ctrl->nr_banks, sizeof(*ctrl->pin_banks),
+				       GFP_KERNEL);
 	if (!ctrl->pin_banks)
 		return -ENOMEM;
 
@@ -676,7 +648,6 @@ static int nvt_pinconf_set_output(struct nvt_pinctrl *npctl, unsigned int pin_id
 
 static int nvt_pinconf_get_output(struct nvt_pinctrl *npctl, unsigned int pin_id)
 {
-
 	int port_num, group_num;
 	unsigned int value;
 	void __iomem *base;
@@ -750,7 +721,7 @@ static int nvt_pinconf_get_schmitt_enable(struct nvt_pinctrl *npctl, unsigned in
 	nvt_gpio_cla_port(pin_id, &group_num, &port_num);
 	base = npctl->ctrl->pin_banks[group_num].reg_base;
 	value = readl(base + GPIO_SMTEN);
-	value = (value>>port_num)&0x1;
+	value = (value >> port_num) & 0x1;
 	return value;
 }
 
@@ -763,8 +734,8 @@ static int nvt_pinconf_set_schmitt(struct nvt_pinctrl *npctl, unsigned int pin_i
 	nvt_gpio_cla_port(pin_id, &group_num, &port_num);
 	base = npctl->ctrl->pin_banks[group_num].reg_base;
 	value = readl(base + GPIO_SMTEN);
-	value &= ~(1<<port_num);
-	value |= ((schmitt&0x1)<<port_num);
+	value &= ~BIT(port_num);
+	value |= ((schmitt & 0x1) << port_num);
 	writel(value, base + GPIO_SMTEN);
 
 	return 0;
@@ -812,8 +783,8 @@ static int nvt_pinconf_set_power_source(struct nvt_pinctrl *npctl, unsigned int 
 	nvt_gpio_cla_port(pin_id, &group_num, &port_num);
 	base = npctl->ctrl->pin_banks[group_num].reg_base;
 	value = readl(base + GPIO_SPW);
-	value &= ~(0x1<<port_num);
-	value |= (v<<port_num);
+	value &= ~BIT(port_num);
+	value |= (v << port_num);
 	writel(value, base + GPIO_SPW);
 
 	return 0;
@@ -828,16 +799,14 @@ static int nvt_pinconf_get_power_source(struct nvt_pinctrl *npctl, unsigned int 
 	nvt_gpio_cla_port(pin_id, &group_num, &port_num);
 	base = npctl->ctrl->pin_banks[group_num].reg_base;
 	value = readl(base + GPIO_SPW);
-	if ((value>>port_num)&0x1)
+	if ((value >> port_num) & 0x1)
 		return 3300;
 	else
 		return 1800;
 }
 
-
-
 static int nvt_pinconf_get_drive_strength(struct nvt_pinctrl *npctl, unsigned int pin_id,
-					u16 *strength)
+					  u16 *strength)
 {
 	int port_num, group_num;
 	unsigned int value;
@@ -847,17 +816,17 @@ static int nvt_pinconf_get_drive_strength(struct nvt_pinctrl *npctl, unsigned in
 	base = npctl->ctrl->pin_banks[group_num].reg_base;
 	if (port_num < 8) {
 		value = readl(base + GPIO_DS);
-		*strength = (value>>(port_num*4))&0x7;
+		*strength = (value >> (port_num * 4)) & 0x7;
 	} else {
 		value = readl(base + GPIO_UDS);
-		*strength = (value>>((port_num-8)*4))&0x7;
+		*strength = (value >> ((port_num - 8) * 4)) & 0x7;
 	}
 
 	return 0;
 }
 
 static int nvt_pinconf_set_drive_strength(struct nvt_pinctrl *npctl, unsigned int pin_id,
-					int strength)
+					  int strength)
 {
 	int port_num, group_num;
 	unsigned int value;
@@ -868,13 +837,13 @@ static int nvt_pinconf_set_drive_strength(struct nvt_pinctrl *npctl, unsigned in
 
 	if (port_num < 8) {
 		value = readl(base + GPIO_DS);
-		value = value & ~(0x7<<(port_num*4));
-		value = value | ((strength&0x7)<<(port_num*4));
+		value = value & ~(0x7 << (port_num * 4));
+		value = value | ((strength & 0x7) << (port_num * 4));
 		writel(value, base + GPIO_DS);
 	} else {
 		value = readl(base + GPIO_UDS);
-		value = value & ~(0x7<<((port_num-8)*4));
-		value = value | ((strength&0x7)<<((port_num-8)*4));
+		value = value & ~(0x7 << ((port_num - 8) * 4));
+		value = value | ((strength & 0x7) << ((port_num - 8) * 4));
 		writel(value, base + GPIO_UDS);
 	}
 
@@ -924,7 +893,7 @@ static int nvt_pinconf_get(struct pinctrl_dev *pctldev, unsigned int pin_id, uns
 }
 
 static int nvt_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin_id,
-				unsigned long *configs, unsigned int num_configs)
+			   unsigned long *configs, unsigned int num_configs)
 {
 	struct nvt_pinctrl *npctl = pinctrl_dev_get_drvdata(pctldev);
 	enum pin_config_param param;
@@ -941,30 +910,29 @@ static int nvt_pinconf_set(struct pinctrl_dev *pctldev, unsigned int pin_id,
 			ret = nvt_pinconf_set_pull(npctl, pin_id, param);
 			break;
 		case PIN_CONFIG_INPUT_SCHMITT_ENABLE:
-			ret =
-			nvt_pinconf_set_schmitt(npctl, pin_id, 1);
+			ret = nvt_pinconf_set_schmitt(npctl, pin_id, 1);
 			break;
 		case PIN_CONFIG_DRIVE_STRENGTH:
-			ret =
-			nvt_pinconf_set_drive_strength(npctl, pin_id, arg);
+			ret = nvt_pinconf_set_drive_strength(npctl, pin_id, arg);
 			break;
 		case PIN_CONFIG_INPUT_SCHMITT:
-			ret =
-			nvt_pinconf_set_schmitt(npctl, pin_id, arg);
+			ret = nvt_pinconf_set_schmitt(npctl, pin_id, arg);
 			break;
 		case PIN_CONFIG_OUTPUT_ENABLE:
 			ret = nvt_pinconf_set_output(npctl, pin_id, arg);
 			break;
 		case PIN_CONFIG_SLEW_RATE:
-			ret =
-			nvt_pinconf_set_slew_rate(npctl, pin_id, arg);
+			ret = nvt_pinconf_set_slew_rate(npctl, pin_id, arg);
 			break;
 		case PIN_CONFIG_POWER_SOURCE:
 			ret = nvt_pinconf_set_power_source(npctl, pin_id, arg);
 			break;
 		default:
-		return -ENOTSUPP;
+			return -ENOTSUPP;
 		}
+
+		if (ret)
+			return ret;
 	}
 
 	return 0;
@@ -982,7 +950,7 @@ static int nvt_pinctrl_parse_groups(struct device_node *np, struct nvt_pin_group
 	struct nvt_pin_setting *pin;
 	int size;
 	const __be32 *list;
-	int i, j, ret;
+	int i, j;
 
 	grp->name = np->name;
 	list = of_get_property(np, "nuvoton,pins", &size);
@@ -995,7 +963,7 @@ static int nvt_pinctrl_parse_groups(struct device_node *np, struct nvt_pin_group
 	grp->npins = size / 4;
 	grp->pins = devm_kzalloc(npctl->dev, grp->npins * sizeof(unsigned int), GFP_KERNEL);
 	grp->settings = devm_kzalloc(npctl->dev, grp->npins * sizeof(struct nvt_pin_setting),
-					GFP_KERNEL);
+				     GFP_KERNEL);
 	if (!grp->settings)
 		return -ENOMEM;
 
@@ -1013,8 +981,8 @@ static int nvt_pinctrl_parse_groups(struct device_node *np, struct nvt_pin_group
 			return -EINVAL;
 
 		np_config = of_find_node_by_phandle(be32_to_cpup(phandle));
-		ret = pinconf_generic_parse_dt_config(np_config, NULL, &pin->configs,
-						      &pin->nconfigs);
+		pinconf_generic_parse_dt_config(np_config, NULL, &pin->configs, &pin->nconfigs);
+		of_node_put(np_config);
 		grp->pins[j] = npctl->info->get_pin_num(pin->offset, pin->shift);
 		pin++;
 	}
@@ -1023,7 +991,7 @@ static int nvt_pinctrl_parse_groups(struct device_node *np, struct nvt_pin_group
 }
 
 static int nvt_pinctrl_parse_functions(struct device_node *np, struct nvt_pinctrl *npctl,
-					u32 index)
+				       u32 index)
 {
 	struct device_node *child;
 	struct nvt_pin_func *func;
@@ -1077,10 +1045,9 @@ static int nvt_pinctrl_probe_dt(struct platform_device *pdev, struct nvt_pinctrl
 		return -ENOMEM;
 
 	npctl->groups = devm_kzalloc(&pdev->dev, npctl->ngroups * sizeof(struct nvt_pin_group),
-					GFP_KERNEL);
+				     GFP_KERNEL);
 	if (!npctl->groups)
 		return -ENOMEM;
-
 
 	i = 0;
 	for_each_child_of_node(np, child) {
