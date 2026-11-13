@@ -6,10 +6,8 @@
  *
  */
 
-
 #define DRVNAME "ma35d1-regulator"
 #define pr_fmt(fmt) DRVNAME ": " fmt
-
 
 #include <linux/arm-smccc.h>
 #include <linux/device.h>
@@ -44,9 +42,7 @@ static int ma35d1_get_voltage_sel(struct regulator_dev *regdev)
 	struct ma35d1_info *info = rdev_get_drvdata(regdev);
 	int idx;
 
-	arm_smccc_smc(MA35D1_SIP_PMIC,
-			info->id,
-			0, 0, 0, 0, 0, 0, &res);
+	arm_smccc_smc(MA35D1_SIP_PMIC, info->id, 0, 0, 0, 0, 0, 0, &res);
 
 	for (idx = 0; idx < ARRAY_SIZE(ma35d1_pmic_table); idx++)
 		if (res.a0 == ma35d1_pmic_table[idx])
@@ -56,15 +52,13 @@ static int ma35d1_get_voltage_sel(struct regulator_dev *regdev)
 }
 
 static int ma35d1_set_voltage_sel(struct regulator_dev *regdev,
-					unsigned int sel)
+				  unsigned int sel)
 {
 	struct arm_smccc_res res;
 	struct ma35d1_info *info = rdev_get_drvdata(regdev);
 
-	arm_smccc_smc(MA35D1_SIP_PMIC,
-		info->id,
-		ma35d1_pmic_table[sel],
-		0, 0, 0, 0, 0, &res);
+	arm_smccc_smc(MA35D1_SIP_PMIC, info->id, ma35d1_pmic_table[sel],
+		      0, 0, 0, 0, 0, &res);
 
 	return 0;
 }
@@ -142,7 +136,7 @@ static struct platform_driver ma35d1_regulator_driver = {
 
 module_platform_driver(ma35d1_regulator_driver);
 
-MODULE_DESCRIPTION("Nuvootn ma35d1 regulator");
+MODULE_DESCRIPTION("Nuvoton ma35d1 regulator");
 MODULE_LICENSE("GPL v2");
 MODULE_ALIAS("platform:ma35d1-regulator");
 
