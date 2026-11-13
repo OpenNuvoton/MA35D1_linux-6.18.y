@@ -117,7 +117,7 @@ void DWLReadAsicConfig(DWLHwConfig_t *config)
 	}
 	if (product >= 0x8190U || product == 0x6731U || product == 0x6e64U)
 		vc_dwl_limit_primary_codecs(config,
-			vc_os_mmio_read32(VC_DWL_DEC_FUSE_CFG),
+					    vc_os_mmio_read32(VC_DWL_DEC_FUSE_CFG),
 			vc_os_mmio_read32(VC_DWL_PP_FUSE_CFG));
 	config->webpSupport = 1U;
 	vc_dwl_shadow_config[0][0] = id;

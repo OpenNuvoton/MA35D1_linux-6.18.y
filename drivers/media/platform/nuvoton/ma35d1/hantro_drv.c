@@ -22,6 +22,7 @@
 #include <linux/pm.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
+#include <linux/string_choices.h>
 #include <linux/mfd/syscon.h>
 #include <linux/mfd/ma35d1-sys.h>
 #include <linux/videodev2.h>
@@ -40,8 +41,6 @@
 #define VC8K_VERSION	"1.2.27"
 #define DRIVER_NAME	"ma35d1-vc8000"
 #define DRIVER_DESC	"MA35D1 VC8000 H264/JPEG driver"
-
-extern struct vb2_mem_ops ma35d1_vb2_dma_memops;
 
 int hantro_debug;
 module_param_named(debug, hantro_debug, int, 0644);
@@ -69,11 +68,11 @@ static int
 hantro_dec_buf_finish(struct hantro_ctx *ctx, struct vb2_buffer *buf,
 		      unsigned int bytesused)
 {
-        int  i;
+	int  i;
 
 	/* For decoders set bytesused as per the output picture. */
 	for (i = 0; i < buf->num_planes; i++)
-                buf->planes[i].bytesused = ctx->dst_fmt.plane_fmt[i].sizeimage;
+		buf->planes[i].bytesused = ctx->dst_fmt.plane_fmt[i].sizeimage;
 	return 0;
 }
 
@@ -100,8 +99,8 @@ static void hantro_job_finish(struct hantro_dev *vpu,
 	if (WARN_ON(!dst))
 		return;
 
-        if (dst->flags & V4L2_BUF_FLAG_LAST)
-                eos = 1;
+	if (dst->flags & V4L2_BUF_FLAG_LAST)
+		eos = 1;
 
 	src->sequence = ctx->sequence_out++;
 	dst->sequence = ctx->sequence_cap++;
@@ -115,16 +114,16 @@ static void hantro_job_finish(struct hantro_dev *vpu,
 		ctx->buf_finish(ctx, &dst->vb2_buf, bytesused);
 	}
 
-	if(result == VB2_BUF_STATE_ERROR)
+	if (result == VB2_BUF_STATE_ERROR)
 		dst->flags |= V4L2_BUF_FLAG_ERROR;
 
 	v4l2_m2m_buf_done(src, result);
 	v4l2_m2m_buf_done(dst, result);
 
-        if (eos) {
-                // dev_info(ctx->dev->dev, "%s - Send EOS\n", __func__);
-                v4l2_event_queue_fh(&ctx->fh, &eos_event);
-        }
+	if (eos) {
+		// dev_info(ctx->dev->dev, "%s - Send EOS\n", __func__);
+		v4l2_event_queue_fh(&ctx->fh, &eos_event);
+	}
 
 	v4l2_m2m_job_finish(vpu->m2m_dev, ctx->fh.m2m_ctx);
 }
@@ -139,9 +138,8 @@ void hantro_irq_done(struct hantro_dev *vpu, unsigned int bytesused,
 	 * the timeout expired. The watchdog is running,
 	 * and will take care of finishing the job.
 	 */
-	if (cancel_delayed_work(&vpu->watchdog_work)) {
+	if (cancel_delayed_work(&vpu->watchdog_work))
 		hantro_job_finish(vpu, ctx, bytesused, result);
-	}
 }
 EXPORT_SYMBOL(hantro_irq_done);
 
@@ -205,7 +203,6 @@ static void device_run(void *priv)
 	}
 
 	ctx->codec_ops->run(ctx);
-	return;
 }
 
 bool hantro_is_encoder_ctx(const struct hantro_ctx *ctx)
@@ -213,12 +210,11 @@ bool hantro_is_encoder_ctx(const struct hantro_ctx *ctx)
 	bool ret = (ctx->buf_finish == hantro_enc_buf_finish);
 
 	if (ret)
-		dev_warn(ctx->dev->dev, "\n\n\n!!! %s, %s, %d - hantro is not decoder!!!\n\n\n", __FILE__, __func__, __LINE__);
+		dev_warn(ctx->dev->dev, "%s: hantro is not decoder!\n", __func__);
 
 	return ret;
 }
 EXPORT_SYMBOL(hantro_is_encoder_ctx);
-
 
 static struct v4l2_m2m_ops vpu_m2m_ops = {
 	.device_run = device_run,
@@ -381,7 +377,6 @@ static int hantro_ctrls_setup(struct hantro_dev *vpu,
 	return v4l2_ctrl_handler_setup(&ctx->ctrl_handler);
 }
 
-
 struct hantro_ctx *get_hantro_context_by_pid(struct hantro_ctx *ctx)
 {
 	struct hantro_ctx  *ret;
@@ -392,7 +387,7 @@ struct hantro_ctx *get_hantro_context_by_pid(struct hantro_ctx *ctx)
 		if (ret == ctx)
 			return ctx;
 	}
-	
+
 	/* search matched process ID from opened context list */
 	pid = task_pid_nr(current);
 	list_for_each_entry(ret, &hantro_context_list, list) {
@@ -440,7 +435,7 @@ static int hantro_open(struct file *filp)
 		ctx->fh.m2m_ctx = v4l2_m2m_ctx_init(vpu->m2m_dev, ctx,
 						    queue_init);
 	} else {
-		dev_err(vpu->dev, "%s, %s, %d - error \n", __FILE__, __func__, __LINE__);
+		dev_err(vpu->dev, "%s, %s, %d - error\n", __FILE__, __func__, __LINE__);
 		ctx->fh.m2m_ctx = ERR_PTR(-ENODEV);
 	}
 	if (IS_ERR(ctx->fh.m2m_ctx)) {
@@ -461,11 +456,11 @@ static int hantro_open(struct file *filp)
 		goto err_fh_free;
 	}
 	ctx->fh.ctrl_handler = &ctx->ctrl_handler;
-	
+
 	ctx->process_id = task_pid_nr(current);
 	// dev_info(vpu->dev, "%s - process id is: %d\n", __func__, ctx->process_id);
 	list_add_tail(&ctx->list, &hantro_context_list);
-	memcpy(&ctx->pp_ctx, &(vpu->vc8k_cfg.ppc), sizeof(struct vc8k_pp_params));
+	memcpy(&ctx->pp_ctx, &vpu->vc8k_cfg.ppc, sizeof(struct vc8k_pp_params));
 	ctx->pp_changed = -1;   /* PP of this context is using global setting */
 	return 0;
 
@@ -490,10 +485,8 @@ static int hantro_release(struct file *filp)
 	v4l2_fh_exit(&ctx->fh);
 	v4l2_ctrl_handler_free(&ctx->ctrl_handler);
 
-	if (ctx->vc8k_data != NULL) {
-		kfree(ctx->vc8k_data);
-		ctx->vc8k_data = NULL;
-	}
+	kfree(ctx->vc8k_data);
+	ctx->vc8k_data = NULL;
 	list_del(&ctx->list);
 	kfree(ctx);
 	return 0;
@@ -678,8 +671,8 @@ static int hantro_add_func(struct hantro_dev *vpu, unsigned int funcid)
 	vfd->device_caps = V4L2_CAP_STREAMING | V4L2_CAP_VIDEO_M2M_MPLANE |
 				V4L2_CAP_VIDEO_CAPTURE_MPLANE | V4L2_CAP_VIDEO_OUTPUT_MPLANE;
 	vfd->ioctl_ops = &hantro_ioctl_ops;
-	snprintf(vfd->name, sizeof(vfd->name), "%s-%s", match->compatible,
-		 funcid == MEDIA_ENT_F_PROC_VIDEO_ENCODER ? "enc" : "dec");
+	scnprintf(vfd->name, sizeof(vfd->name), "%s-%s", match->compatible,
+		  funcid == MEDIA_ENT_F_PROC_VIDEO_ENCODER ? "enc" : "dec");
 
 	if (funcid == MEDIA_ENT_F_PROC_VIDEO_ENCODER)
 		vpu->encoder = func;
@@ -743,7 +736,6 @@ static void hantro_remove_dec_func(struct hantro_dev *vpu)
 	hantro_remove_func(vpu, MEDIA_ENT_F_PROC_VIDEO_DECODER);
 }
 
-
 static const struct media_device_ops hantro_m2m_media_ops = {
 	.req_validate = vb2_request_validate,
 	.req_queue = v4l2_m2m_request_queue,
@@ -752,7 +744,7 @@ static const struct media_device_ops hantro_m2m_media_ops = {
 static int hantro_probe(struct platform_device *pdev)
 {
 	const struct of_device_id *match;
-	struct device_node * np;
+	struct device_node *np;
 	struct resource r;
 
 	struct hantro_dev *vpu;
@@ -764,25 +756,6 @@ static int hantro_probe(struct platform_device *pdev)
 
 	dev_info(&pdev->dev, "VC8000 driver version %s\n", VC8K_VERSION);
 
-#if 0
-	struct regmap *sysregmap;
-	u32 reg;
-
-	sysregmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "nuvoton,sys");
-	if (!sysregmap) {
-		dev_err(&pdev->dev, "nuvoton,sys is required!\n");
-		return -EINVAL;
-	}
-
-	/* read SYS_PDID */
-	regmap_read(sysregmap, REG_SYS_PDID, &reg);
-	reg = (reg >> 16) & 0xff;
-
-	if (reg == 0xa1 || reg == 0x81 || reg == 0x82) {
-		dev_err(&pdev->dev, "VC8000 H/W version not supported!\n");
-		return -EINVAL;
-	}
-#endif
 	vpu = devm_kzalloc(&pdev->dev, sizeof(*vpu), GFP_KERNEL);
 	if (!vpu)
 		return -ENOMEM;
@@ -790,7 +763,7 @@ static int hantro_probe(struct platform_device *pdev)
 	_vc8k_vpu = vpu;
 	vpu->dev = &pdev->dev;
 	vpu->pdev = pdev;
-	vc8k_cfg = &(vpu->vc8k_cfg);
+	vc8k_cfg = &vpu->vc8k_cfg;
 	mutex_init(&vpu->vpu_mutex);
 	spin_lock_init(&vpu->irqlock);
 
@@ -811,9 +784,8 @@ static int hantro_probe(struct platform_device *pdev)
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	vpu->dec_base = devm_ioremap_resource(vpu->dev, res);
-	if (IS_ERR(vpu->dec_base)) {
+	if (IS_ERR(vpu->dec_base))
 		return PTR_ERR(vpu->dec_base);
-	}
 
 	vpu->enc_base = vpu->dec_base;
 
@@ -831,12 +803,11 @@ static int hantro_probe(struct platform_device *pdev)
 	 *  Get irq number and install irq handler
 	 */
 	irq = platform_get_irq(pdev, 0);
-	if (irq <= 0) {
-		dev_err(vpu->dev, "Failed to get VC8K irq!\n");
+	if (irq <= 0)
 		return -ENODEV;
-	}
+
 	ret = devm_request_irq(vpu->dev, irq, vpu->variant->irqs[0].handler, 0,
-				dev_name(vpu->dev), vpu);
+			       dev_name(vpu->dev), vpu);
 	if (ret) {
 		dev_err(vpu->dev, "Failed to request IRQ%d: err: %d.\n", irq, ret);
 		return ret;
@@ -887,31 +858,26 @@ static int hantro_probe(struct platform_device *pdev)
 		goto err_rm_dec_func;
 	}
 
-	/*-----------------------------------------------------------------------------------------*/
-	/*  Read device tree settings                                                              */
-	/*-----------------------------------------------------------------------------------------*/
+	/* Read device tree settings */
 	vc8k_cfg->ppc.enable_pp = 1;       /* default enable PP   */
-	if ((!of_property_read_string(vpu->dev->of_node, "pp_out_enable",
-		&setting)) && !strcmp(setting, "no")) {
-		vc8k_cfg->ppc.enable_pp = 0;       /* default disable PP   */
-	}
+	if (!of_property_read_string(vpu->dev->of_node, "pp_out_enable", &setting) &&
+	    !strcmp(setting, "no"))
+		vc8k_cfg->ppc.enable_pp = 0;
 
-	if (of_property_read_u32(vpu->dev->of_node, "pp_wait_vsync", &(vc8k_cfg->pp_wait_vsync))) {
+	if (of_property_read_u32(vpu->dev->of_node, "pp_wait_vsync", &vc8k_cfg->pp_wait_vsync))
 		vc8k_cfg->pp_wait_vsync = 0;
-	}
 
-	if (of_property_read_u32(vpu->dev->of_node, "debug_level", &(vc8k_cfg->debug_level))) {
+	if (of_property_read_u32(vpu->dev->of_node, "debug_level", &vc8k_cfg->debug_level))
 		vc8k_cfg->debug_level = 0;
-	}
 
 	/* fb_width */
-	if (of_property_read_u32(vpu->dev->of_node, "fb_width", &(vc8k_cfg->fb_width))) {
+	if (of_property_read_u32(vpu->dev->of_node, "fb_width", &vc8k_cfg->fb_width)) {
 		dev_warn(vpu->dev, "Device tree fb_width not found, use default 1024!\n");
 		vc8k_cfg->fb_width = 1024;
 	}
 
 	/* fb_height */
-	if (of_property_read_u32(vpu->dev->of_node, "fb_height", &(vc8k_cfg->fb_height))) {
+	if (of_property_read_u32(vpu->dev->of_node, "fb_height", &vc8k_cfg->fb_height)) {
 		dev_warn(vpu->dev, "Device tree fb_height not found, use default 600!\n");
 		vc8k_cfg->fb_height = 600;
 	}
@@ -929,33 +895,29 @@ static int hantro_probe(struct platform_device *pdev)
 			vc8k_cfg->fb_fmt = V4L2_PIX_FMT_NV12;  // YUV420P
 	}
 
-	/* enable debug */
-	if (of_property_read_u32(vpu->dev->of_node, "use_dev_coherent", &(vc8k_cfg->use_dev_coherent))) {
-		dev_warn(vpu->dev, "Device tree use_dev_coherent not found, use default 1!\n");
-		vc8k_cfg->use_dev_coherent = 1;
-	}
-
 	/* use_dev_coherent */
-	if (of_property_read_u32(vpu->dev->of_node, "use_dev_coherent", &(vc8k_cfg->use_dev_coherent))) {
+	if (of_property_read_u32(vpu->dev->of_node, "use_dev_coherent",
+				 &vc8k_cfg->use_dev_coherent)) {
 		dev_warn(vpu->dev, "Device tree use_dev_coherent not found, use default 1!\n");
 		vc8k_cfg->use_dev_coherent = 1;
 	}
 
 	vc8k_cfg->ppc.frame_buf_w = vc8k_cfg->fb_width;
 	vc8k_cfg->ppc.frame_buf_h = vc8k_cfg->fb_height;
-	vc8k_cfg->ppc.img_out_x = 0;       /* default output image to left-up corner of frame buffer */
+	vc8k_cfg->ppc.img_out_x = 0;       /* output image at top-left of frame buffer */
 	vc8k_cfg->ppc.img_out_y = 0;
-	vc8k_cfg->ppc.img_out_w = vc8k_cfg->fb_width;   /* default image output full screen          */
+	vc8k_cfg->ppc.img_out_w = vc8k_cfg->fb_width;   /* default: full screen */
 	vc8k_cfg->ppc.img_out_h = vc8k_cfg->fb_height;
 	vc8k_cfg->ppc.img_out_fmt = vc8k_cfg->fb_fmt;
 	vc8k_cfg->ppc.rotation = 0;
 
-	dev_info(vpu->dev, "PP default %s\n", vc8k_cfg->ppc.enable_pp ? "enabled" : "disabled");
+	dev_info(vpu->dev, "PP default %s\n", str_enabled_disabled(vc8k_cfg->ppc.enable_pp));
 	dev_info(vpu->dev, "pp_wait_vsync = %d\n", vc8k_cfg->pp_wait_vsync);
 	dev_info(vpu->dev, "fb_width = %d\n", vc8k_cfg->fb_width);
 	dev_info(vpu->dev, "fb_height = %d\n", vc8k_cfg->fb_height);
-	dev_info(vpu->dev, "fb_fmt = %c%c%c%c\n", (vc8k_cfg->fb_fmt & 0x7f), (vc8k_cfg->fb_fmt >> 8) & 0x7f,
-	                              (vc8k_cfg->fb_fmt >> 16) & 0x7f, (vc8k_cfg->fb_fmt >> 24) & 0x7f);
+	dev_info(vpu->dev, "fb_fmt = %c%c%c%c\n", vc8k_cfg->fb_fmt & 0x7f,
+		 (vc8k_cfg->fb_fmt >> 8) & 0x7f, (vc8k_cfg->fb_fmt >> 16) & 0x7f,
+		 (vc8k_cfg->fb_fmt >> 24) & 0x7f);
 	dev_info(vpu->dev, "ppc.frame_buf_w = %d\n", vc8k_cfg->ppc.frame_buf_w);
 	dev_info(vpu->dev, "ppc.frame_buf_h = %d\n", vc8k_cfg->ppc.frame_buf_h);
 	dev_info(vpu->dev, "ppc.img_out_x = %d\n", vc8k_cfg->ppc.img_out_x);
@@ -981,36 +943,38 @@ static int hantro_probe(struct platform_device *pdev)
 
 		vc8k_cfg->res_mem_size = 0;
 		if (vc8k_cfg->use_dev_coherent) {
+			void **virt = (void **)&vc8k_cfg->res_mem_virt;
+
 			/*
-		 	 *  Use reserved memory as device coherent memory
-		 	 */
+			 *  Use reserved memory as device coherent memory
+			 */
 			vc8k_cfg->res_mem_base = r.start;
 			vc8k_cfg->res_mem_size = resource_size(&r);
 
-			ret = vc_compat_dma_declare_coherent_memory(vpu->dev,
-					vc8k_cfg->res_mem_base,
-					vc8k_cfg->res_mem_base,
-					vc8k_cfg->res_mem_size,
-					(void **)&vc8k_cfg->res_mem_virt);
+			ret = vc_compat_dma_declare_coherent_memory(vpu->dev, r.start, r.start,
+								    vc8k_cfg->res_mem_size, virt);
 			if (ret == 0) {
 				dma_set_coherent_mask(vpu->dev, DMA_BIT_MASK(32));
 			} else {
-				printk("dma_declare_coherent_memory failed: %d\n", ret);
+				dev_err(vpu->dev, "dma_declare_coherent_memory failed: %d\n", ret);
 				ret = -ENOMEM;
 				goto err_rm_dec_func;
 			}
 		} else {
 			/*
-		 	 *  Manage reserved memory by VC8K driver
-		 	 */
+			 *  Manage reserved memory by VC8K driver
+			 */
 			vc8k_cfg->res_mem_base = r.start;
 			vc8k_cfg->res_mem_size = resource_size(&r);
-			vc8k_cfg->res_mem_virt = memremap(r.start, vc8k_cfg->res_mem_size, MEMREMAP_WB);
-			if (VC8K_PreAllocDMABuff(&pdev->dev, vpu) != 0)
-				return -ENOMEM;
+			vc8k_cfg->res_mem_virt = memremap(r.start, vc8k_cfg->res_mem_size,
+							  MEMREMAP_WB);
+			if (VC8K_PreAllocDMABuff(&pdev->dev, vpu) != 0) {
+				ret = -ENOMEM;
+				goto err_rm_dec_func;
+			}
 		}
-		dev_info(vpu->dev, "VC8000 reserved memory: vaddr: 0x%llx, paddr: 0x%llx size 0x%lx\n",
-			 (u64)vc8k_cfg->res_mem_virt, vc8k_cfg->res_mem_base,
+		dev_info(vpu->dev, "VC8000 reserved memory: vaddr: %p, paddr: 0x%llx size 0x%lx\n",
+			 vc8k_cfg->res_mem_virt, vc8k_cfg->res_mem_base,
 			 vc8k_cfg->res_mem_size);
 	}
 
@@ -1023,7 +987,8 @@ static int hantro_probe(struct platform_device *pdev)
 
 	mutex_init(&vpu->lock);
 
-	if (ma35d1_vc8k_init(vpu) != 0) {
+	ret = ma35d1_vc8k_init(vpu);
+	if (ret) {
 		dev_err(&pdev->dev, "Failed to init VC8000 device!\n");
 		goto err_rm_dec_func;
 	}

@@ -144,12 +144,12 @@ i32 DWLMallocLinear(const void *instance, u32 size, DWLLinearMem_t *memory)
 
 	if (_vc8k_vpu->vc8k_cfg.use_dev_coherent) {
 		ret = vc_os_dma_alloc_from_coherent(size, &memory->busAddress,
-					    &cpu_address);
+						    &cpu_address);
 		if (!ret || !cpu_address)
 			return DWL_ERROR;
 	} else {
 		cpu_address = vc_os_dma_alloc_writecombine(size,
-						    &memory->busAddress);
+							   &memory->busAddress);
 		if (!cpu_address)
 			return DWL_ERROR;
 	}
@@ -188,7 +188,7 @@ i32 DWLMallocRefFrm(const void *instance, u32 size, DWLLinearMem_t *memory)
 
 	if (_vc8k_vpu->vc8k_cfg.use_dev_coherent) {
 		ret = vc_os_dma_alloc_from_coherent(size, &memory->busAddress,
-					    &cpu_address);
+						    &cpu_address);
 		if (!ret || !cpu_address)
 			return DWL_ERROR;
 	} else {

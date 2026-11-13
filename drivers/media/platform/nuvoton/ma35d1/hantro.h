@@ -97,7 +97,7 @@ struct vc8k_config {
 	int   use_dev_coherent;      /* use device coherent memory            */
 	int   debug_level;           /* debug message control 0: no message */
         phys_addr_t  res_mem_base;
-        char __iomem *res_mem_virt;
+        char *res_mem_virt;
         size_t  res_mem_size;
 };
 

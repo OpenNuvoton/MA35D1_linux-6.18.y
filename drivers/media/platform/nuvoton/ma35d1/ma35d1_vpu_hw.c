@@ -163,41 +163,10 @@ static const struct hantro_fmt ma35d1_vpu_dec_fmts[] = {
 			.step_width = 8,
 			.min_height = 48,
 			.max_height = VC8K_MAX_HEIGHT,
-			.step_height =8,
-		},
-	},
-#if 0
-	{
-		.fourcc = V4L2_PIX_FMT_MJPEG,
-		.codec_mode = HANTRO_MODE_JPEG_DEC,
-		.max_depth = 1,
-		.frmsize = {
-			.min_width = 48,
-			.max_width = 16000,
-			.step_width = 4,
-			.min_height = 48,
-			.max_height = 16000,
-			.step_height = 4,
-		},
-	},
-#endif
-#if 0
-	{
-		.fourcc = V4L2_PIX_FMT_MA35D1_PP,
-		.codec_mode = HANTRO_MODE_PP,
-		.max_depth = 1,
-		.frmsize = {
-			.min_width = 48,
-			.max_width = 8192,
-			.step_width = 8,
-			.min_height = 48,
-			.max_height = 8192,
 			.step_height = 8,
 		},
 	},
-#endif
 };
-
 
 static irqreturn_t ma35d1_vdpu_irq(int irq, void *dev_id)
 {
@@ -228,7 +197,7 @@ static irqreturn_t ma35d1_vdpu_irq(int irq, void *dev_id)
 		vdpu_write(vpu, 0, 60 * 4);  // clear swreg60
 		if (vpu->dcultra_base)
 			writel_relaxed(readl_relaxed(vpu->dcultra_base + 0x1518) | 0x11,
-					(vpu->dcultra_base + 0x1518));  // trigger display
+				       (vpu->dcultra_base + 0x1518));  // trigger display
 	}
 	return IRQ_HANDLED;
 }
@@ -274,7 +243,6 @@ EXPORT_SYMBOL(hantro_g1_jpeg_dec_run);
 
 void hantro_g1_pp_run(struct hantro_ctx *ctx)
 {
-
 	hantro_prepare_run(ctx);
 
 	hantro_finish_run(ctx);
@@ -282,7 +250,6 @@ void hantro_g1_pp_run(struct hantro_ctx *ctx)
 	ma35d1_pp_run(ctx);
 }
 EXPORT_SYMBOL(hantro_g1_pp_run);
-
 
 static void ma35d1_vpu_dec_reset(struct hantro_ctx *ctx)
 {

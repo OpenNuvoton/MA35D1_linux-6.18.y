@@ -37,7 +37,7 @@ hantro_get_formats(const struct hantro_ctx *ctx, unsigned int *num_fmts)
 	const struct hantro_fmt *formats;
 
 	if (hantro_is_encoder_ctx(ctx)) {
-		dev_err(ctx->dev->dev, "hantro_get_formats - encode is not supported!\n");
+		dev_err(ctx->dev->dev, "%s - encode is not supported!\n", __func__);
 		formats = ctx->dev->variant->enc_fmts;
 		*num_fmts = ctx->dev->variant->num_enc_fmts;
 	} else {
@@ -66,8 +66,9 @@ hantro_get_default_fmt(const struct hantro_fmt *formats, unsigned int num_fmts,
 	unsigned int i;
 
 	for (i = 0; i < num_fmts; i++) {
-		if (bitstream == (formats[i].codec_mode !=
-				  HANTRO_MODE_NONE))
+		bool is_bitstream = formats[i].codec_mode != HANTRO_MODE_NONE;
+
+		if (bitstream == is_bitstream)
 			return &formats[i];
 	}
 	return NULL;
@@ -96,7 +97,7 @@ static int vidioc_enum_framesizes(struct file *file, void *priv,
 
 	if (fsize->index != 0) {
 		dev_err(ctx->dev->dev, "invalid frame size index (expected 0, got %d)\n",
-			  fsize->index);
+			fsize->index);
 		return -EINVAL;
 	}
 
@@ -104,7 +105,7 @@ static int vidioc_enum_framesizes(struct file *file, void *priv,
 	fmt = hantro_find_format(formats, num_fmts, fsize->pixel_format);
 	if (!fmt) {
 		dev_err(ctx->dev->dev, "unsupported bitstream format (%08x)\n",
-			  fsize->pixel_format);
+			fsize->pixel_format);
 		return -EINVAL;
 	}
 
@@ -144,18 +145,17 @@ static int vidioc_enum_fmt(struct file *file, void *priv,
 	for (i = 0; i < num_fmts; i++) {
 		bool mode_none = formats[i].codec_mode == HANTRO_MODE_NONE;
 
-		if (skip_mode_none == mode_none) {
+		if (skip_mode_none == mode_none)
 			continue;
-		}
 
 		if (j == f->index) {
 			fmt = &formats[i];
 			f->pixelformat = fmt->fourcc;
-			dev_dbg(ctx->dev->dev, "%s, %s, %d - %c%c%c%c\n", __FILE__, __func__, __LINE__,
-                  		(fmt->fourcc & 0x7f),
-		  		(fmt->fourcc >> 8) & 0x7f,
-		  		(fmt->fourcc >> 16) & 0x7f,
-		  		(fmt->fourcc >> 24) & 0x7f);
+			dev_dbg(ctx->dev->dev, "%s - %c%c%c%c\n", __func__,
+				fmt->fourcc & 0x7f,
+				(fmt->fourcc >> 8) & 0x7f,
+				(fmt->fourcc >> 16) & 0x7f,
+				(fmt->fourcc >> 24) & 0x7f);
 			return 0;
 		}
 		++j;
@@ -302,7 +302,7 @@ hantro_reset_fmt(struct v4l2_pix_format_mplane *fmt,
 
 	fmt->pixelformat = vpu_fmt->fourcc;
 	fmt->field = V4L2_FIELD_NONE;
-	fmt->colorspace = V4L2_COLORSPACE_JPEG,
+	fmt->colorspace = V4L2_COLORSPACE_JPEG;
 	fmt->ycbcr_enc = V4L2_YCBCR_ENC_DEFAULT;
 	fmt->quantization = V4L2_QUANTIZATION_DEFAULT;
 	fmt->xfer_func = V4L2_XFER_FUNC_DEFAULT;
@@ -407,7 +407,7 @@ vidioc_s_fmt_out_mplane(struct file *file, void *priv, struct v4l2_format *f)
 		 * as the pixelformat remains. Can't be done if streaming.
 		 */
 		if (vb2_is_streaming(vq) || (vb2_is_busy(vq) &&
-		    pix_mp->pixelformat != ctx->src_fmt.pixelformat))
+					     pix_mp->pixelformat != ctx->src_fmt.pixelformat))
 			return -EBUSY;
 
 		/*
@@ -471,38 +471,16 @@ static int vidioc_s_fmt_cap_mplane(struct file *file, void *priv,
 	if (vb2_is_busy(vq))
 		return -EBUSY;
 
-#if 0   // has no encoder
-	if (hantro_is_encoder_ctx(ctx)) {
-		struct vb2_queue *peer_vq;
-
-		/*
-		 * Since format change on the CAPTURE queue will reset
-		 * the OUTPUT queue, we can't allow doing so
-		 * when the OUTPUT queue has buffers allocated.
-		 */
-		peer_vq = v4l2_m2m_get_vq(ctx->fh.m2m_ctx,
-					  V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE);
-		if (vb2_is_busy(peer_vq) &&
-		    (pix_mp->pixelformat != ctx->dst_fmt.pixelformat ||
-		     pix_mp->height != ctx->dst_fmt.height ||
-		     pix_mp->width != ctx->dst_fmt.width))
-			return -EBUSY;
-	}
-#endif
-
 	ret = vidioc_try_fmt_cap_mplane(file, priv, f);
 	if (ret)
 		return ret;
-
 
 	formats = hantro_get_formats(ctx, &num_fmts);
 	ctx->vpu_dst_fmt = hantro_find_format(formats, num_fmts,
 					      pix_mp->pixelformat);
 
-#if 1 //2021.05.24
 	v4l2_fill_pixfmt_mp(pix_mp, pix_mp->pixelformat, pix_mp->width,
 			    pix_mp->height);
-#endif
 	ctx->dst_fmt = *pix_mp;
 
 	/*
@@ -528,7 +506,7 @@ static int vidioc_s_fmt_cap_mplane(struct file *file, void *priv,
 }
 
 static int hantro_subscribe_event(struct v4l2_fh *fh,
-				const struct v4l2_event_subscription *sub)
+				  const struct v4l2_event_subscription *sub)
 {
 	// struct hantro_ctx *ctx = fh_to_ctx(fh);
 
@@ -544,17 +522,14 @@ int vc8k_set_pp_params(struct hantro_dev *vpu, struct hantro_ctx *ctx, void *par
 {
 	struct vc8k_pp_params *pp = (struct vc8k_pp_params *)params;
 	struct hantro_ctx  *ret_ctx;
-	
+
 	ret_ctx = get_hantro_context_by_pid(ctx);
-	if (ret_ctx != NULL) {
+	if (ret_ctx) {
 		ctx = ret_ctx;
 	} else {
-		// dev_info(vpu->dev, "%s - Cannot find matched context. Set global PP settings.\n", __func__);
-		memcpy(&(vpu->vc8k_cfg.ppc), params, sizeof(struct vc8k_pp_params));
+		memcpy(&vpu->vc8k_cfg.ppc, params, sizeof(struct vc8k_pp_params));
 		return 1;
 	}
-
-	// dev_info(vpu->dev, "\n vc8k_set_pp_params: %d, %d, %d\n", pp->enable_pp, pp->img_out_w, pp->img_out_h);
 
 	if (!pp->img_out_w || !pp->img_out_h)
 		return -EINVAL;
@@ -562,80 +537,55 @@ int vc8k_set_pp_params(struct hantro_dev *vpu, struct hantro_ctx *ctx, void *par
 	if (pp->img_out_x + pp->img_out_w > pp->frame_buf_w) {
 		dev_err(vpu->dev, "pp->img_out_x + pp->img_out_w > pp->frame_buf_w!!\n");
 		return -EINVAL;
-        }
-
-	if(pp->libjpeg_mode)
-	{
-		if ((pp->pp_out_dst == 0) || (pp->pp_out_dst == 1))
-		{
-			if (pp->img_out_x + pp->img_out_w > vpu->vc8k_cfg.ppc.frame_buf_w) {
-				dev_warn(vpu->dev, "pp->img_out_x + pp->img_out_w > vpu->vc8k_cfg.ppc.frame_buf_w!!\n");
-			}
-		}
 	}
-	else
-	{
-		// Currrently, H264 not support ppc
-		// This will make H264 PP failed once playback after JPEG.
-		//if (pp->img_out_x + pp->img_out_w > vpu->vc8k_cfg.ppc.frame_buf_w) {
-		//	dev_err(vpu->dev, "pp->img_out_x + pp->img_out_w > vpu->vc8k_cfg.ppc.frame_buf_w!!\n");
-		//	return -EINVAL;
-		//}
+
+	/* H264 skips this check: it would fail H264 PP after JPEG playback */
+	if (pp->libjpeg_mode) {
+		if (pp->pp_out_dst == 0 || pp->pp_out_dst == 1) {
+			if (pp->img_out_x + pp->img_out_w > vpu->vc8k_cfg.ppc.frame_buf_w)
+				dev_warn(vpu->dev, "img_out_x + img_out_w > frame_buf_w!\n");
+		}
 	}
 
 	if (pp->img_out_y + pp->img_out_h > pp->frame_buf_h) {
 		dev_err(vpu->dev, "pp->img_out_y + pp->img_out_h > pp->frame_buf_h!!\n");
 		return -EINVAL;
-        }
+	}
 
-	if(pp->libjpeg_mode)
-	{
-		if ((pp->pp_out_dst == 0) || (pp->pp_out_dst == 1))
-		{
-			if (pp->img_out_y + pp->img_out_h > vpu->vc8k_cfg.ppc.frame_buf_h) {
-				dev_warn(vpu->dev, "pp->img_out_y + pp->img_out_h > vpu->vc8k_cfg.ppc.frame_buf_h!!\n");
-			}
+	/* H264 skips this check: it would fail H264 PP after JPEG playback */
+	if (pp->libjpeg_mode) {
+		if (pp->pp_out_dst == 0 || pp->pp_out_dst == 1) {
+			if (pp->img_out_y + pp->img_out_h > vpu->vc8k_cfg.ppc.frame_buf_h)
+				dev_warn(vpu->dev, "img_out_y + img_out_h > frame_buf_h!\n");
 		}
 	}
-	else
-	{
-		// Currrently, H264 not support ppc
-		// This will make H264 PP failed once playback after JPEG.
-		//if (pp->img_out_y + pp->img_out_h > vpu->vc8k_cfg.ppc.frame_buf_h) {
-		//	dev_err(vpu->dev, "pp->img_out_y + pp->img_out_h > vpu->vc8k_cfg.ppc.frame_buf_h!!\n");
-		//	return -EINVAL;
-		//}
-	}
 
-	if(pp->libjpeg_mode)
-	{
-		if ((pp->img_out_fmt != V4L2_PIX_FMT_NV12) &&
-			(pp->img_out_fmt != V4L2_PIX_FMT_RGB565) &&
-			(pp->img_out_fmt != V4L2_PIX_FMT_YUYV) &&
-			(pp->img_out_fmt != V4L2_PIX_FMT_ARGB32) &&
-			(pp->img_out_fmt != V4L2_PIX_FMT_ABGR32)) 
-		{
+	if (pp->libjpeg_mode) {
+		if (pp->img_out_fmt != V4L2_PIX_FMT_NV12 &&
+		    pp->img_out_fmt != V4L2_PIX_FMT_RGB565 &&
+		    pp->img_out_fmt != V4L2_PIX_FMT_YUYV &&
+		    pp->img_out_fmt != V4L2_PIX_FMT_ARGB32 &&
+		    pp->img_out_fmt != V4L2_PIX_FMT_ABGR32) {
 			dev_err(vpu->dev, "img_out_fmt %x is not supported!\n", pp->img_out_fmt);
 			return -EINVAL;
 		}
-	}
-	else
-	{
-		if ((pp->img_out_fmt != V4L2_PIX_FMT_NV12) && (pp->img_out_fmt != V4L2_PIX_FMT_RGB565) &&
-			(pp->img_out_fmt != V4L2_PIX_FMT_ARGB32)) {
+	} else {
+		if (pp->img_out_fmt != V4L2_PIX_FMT_NV12 &&
+		    pp->img_out_fmt != V4L2_PIX_FMT_RGB565 &&
+		    pp->img_out_fmt != V4L2_PIX_FMT_ARGB32) {
 			dev_err(vpu->dev, "img_out_fmt %x is not supported!\n", pp->img_out_fmt);
 			return -EINVAL;
 		}
 	}
 
 	memcpy(&ctx->pp_ctx, params, sizeof(struct vc8k_pp_params));
-	memcpy(&(vpu->vc8k_cfg.ppc), params, sizeof(struct vc8k_pp_params));
-		ctx->pp_changed = 1;
+	memcpy(&vpu->vc8k_cfg.ppc, params, sizeof(struct vc8k_pp_params));
+	ctx->pp_changed = 1;
 	return 0;
 }
 
 static long vc8k_ioctl_default(struct file *file, void *fh, bool valid_prio,
-			   unsigned int cmd, void *arg)
+			       unsigned int cmd, void *arg)
 {
 	struct hantro_dev *vpu = video_drvdata(file);
 	struct hantro_ctx *ctx = file_to_ctx(file);
@@ -645,7 +595,7 @@ static long vc8k_ioctl_default(struct file *file, void *fh, bool valid_prio,
 	case VC8KIOC_PP_SET_CONFIG:
 		ret = vc8k_set_pp_params(vpu, ctx, arg);
 		if (ret) {
-			dev_err(vpu->dev, "Failed to set VC8K PP parameters! \n");
+			dev_err(vpu->dev, "Failed to set VC8K PP parameters!\n");
 			return ret;
 		}
 		break;
@@ -791,9 +741,7 @@ static int hantro_start_streaming(struct vb2_queue *q, unsigned int count)
 		ctx->codec_ops = &ctx->dev->variant->codec_ops[codec_mode];
 		if (ctx->codec_ops->init)
 			ret = ctx->codec_ops->init(ctx);
-	}
-	else
-	{
+	} else {
 	}
 
 	return ret;

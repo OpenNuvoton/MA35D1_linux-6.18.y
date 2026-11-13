@@ -43,7 +43,7 @@ void vc_os_dma_free_writecombine(u32 size, void *cpu_address,
 				 g1_addr_t device_address)
 {
 	dma_free_attrs(_vc8k_vpu->dev, size, cpu_address, device_address,
-			       DMA_ATTR_WRITE_COMBINE);
+		       DMA_ATTR_WRITE_COMBINE);
 }
 
 u32 vc_os_mmio_read32(u32 register_index)
@@ -62,7 +62,7 @@ i32 vc_os_hw_reserve(u32 engine, u32 client_type)
 		return (i32)vc_hw_engine_command(VC_HW_PP_RESERVE, NULL);
 
 	return (i32)vc_hw_engine_command(VC_HW_DEC_RESERVE,
-				   (void *)(unsigned long)client_type);
+					 (void *)(unsigned long)client_type);
 }
 
 void vc_os_hw_release(u32 engine, i32 core_id)
