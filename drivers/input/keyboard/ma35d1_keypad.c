@@ -81,7 +81,6 @@
 #define ma35d1_NUM_ROWS		8
 #define ma35d1_NUM_COLS		8
 
-
 struct ma35d1_keypad {
 	struct clk *clk;
 	struct input_dev *input_dev;
@@ -96,7 +95,7 @@ struct ma35d1_keypad {
 };
 
 static void ma35d1_keypad_scan_matrix(struct ma35d1_keypad *keypad,
-										unsigned int status)
+				      unsigned int status)
 {
 	struct input_dev *input_dev = keypad->input_dev;
 	unsigned int i, j;
@@ -104,28 +103,28 @@ static void ma35d1_keypad_scan_matrix(struct ma35d1_keypad *keypad,
 	unsigned int code;
 	unsigned int key;
 	unsigned int press_key;
-	unsigned long KeyEvent[4];
+	unsigned long key_event[4];
 	unsigned int row_shift = get_count_order(keypad->kpi_col);
 	unsigned short *keymap = input_dev->keycode;
 
-	KeyEvent[0] = __raw_readl(keypad->mmio_base + KPI_KPE0);
-	KeyEvent[1] = __raw_readl(keypad->mmio_base + KPI_KPE1);
-	KeyEvent[2] = __raw_readl(keypad->mmio_base + KPI_KRE0);
-	KeyEvent[3] = __raw_readl(keypad->mmio_base + KPI_KRE1);
+	key_event[0] = __raw_readl(keypad->mmio_base + KPI_KPE0);
+	key_event[1] = __raw_readl(keypad->mmio_base + KPI_KPE1);
+	key_event[2] = __raw_readl(keypad->mmio_base + KPI_KRE0);
+	key_event[3] = __raw_readl(keypad->mmio_base + KPI_KRE1);
 
-	__raw_writel(KeyEvent[0], (keypad->mmio_base + KPI_KPE0));
-	__raw_writel(KeyEvent[1], (keypad->mmio_base + KPI_KPE1));
-	__raw_writel(KeyEvent[2], (keypad->mmio_base + KPI_KRE0));
-	__raw_writel(KeyEvent[3], (keypad->mmio_base + KPI_KRE1));
+	__raw_writel(key_event[0], (keypad->mmio_base + KPI_KPE0));
+	__raw_writel(key_event[1], (keypad->mmio_base + KPI_KPE1));
+	__raw_writel(key_event[2], (keypad->mmio_base + KPI_KRE0));
+	__raw_writel(key_event[3], (keypad->mmio_base + KPI_KRE1));
 
-	KeyEvent[0] = KeyEvent[0] & keypad->mask_col;
-	KeyEvent[1] = KeyEvent[1] & keypad->mask_col;
-	KeyEvent[2] = KeyEvent[2] & keypad->mask_col;
-	KeyEvent[3] = KeyEvent[3] & keypad->mask_col;
+	key_event[0] = key_event[0] & keypad->mask_col;
+	key_event[1] = key_event[1] & keypad->mask_col;
+	key_event[2] = key_event[2] & keypad->mask_col;
+	key_event[3] = key_event[3] & keypad->mask_col;
 
 	for (j = 0; j < 4; j++) {
-		if (KeyEvent[j] != 0) {
-			if ((j == 1) || (j == 3))
+		if (key_event[j] != 0) {
+			if (j == 1 || j == 3)
 				row_add = 4;
 			else
 				row_add = 0;
@@ -136,9 +135,9 @@ static void ma35d1_keypad_scan_matrix(struct ma35d1_keypad *keypad,
 				press_key = 0;
 
 			for (i = 0; i < 32; i++) {
-				if (KeyEvent[j] & (1<<i)) {
-					code = MATRIX_SCAN_CODE(((i/8) + row_add),
-											(i % 8), row_shift);
+				if (key_event[j] & (1 << i)) {
+					code = MATRIX_SCAN_CODE(((i / 8) + row_add),
+								(i % 8), row_shift);
 					key = keymap[code];
 
 					input_event(input_dev, EV_MSC, MSC_SCAN, code);
@@ -156,7 +155,7 @@ static irqreturn_t ma35d1_keypad_irq_handler(int irq, void *dev_id)
 
 	kstatus = __raw_readl(keypad->mmio_base + KPI_STATUS);
 
-	if (kstatus & (PKEY_INT|RKEY_INT)) {
+	if (kstatus & (PKEY_INT | RKEY_INT)) {
 		ma35d1_keypad_scan_matrix(keypad, kstatus);
 
 		input_sync(keypad->input_dev);
@@ -189,17 +188,9 @@ static int ma35d1_keypad_open(struct input_dev *dev)
 	__raw_writel(val, keypad->mmio_base + KPI_CONF);
 
 	__raw_writel((keypad->pre_scale_divider - 1),
-				keypad->mmio_base + KPI_PRESCALDIV);
+		     keypad->mmio_base + KPI_PRESCALDIV);
 
 	return 0;
-}
-
-static void ma35d1_keypad_close(struct input_dev *dev)
-{
-	struct ma35d1_keypad *keypad = input_get_drvdata(dev);
-
-	/* Disable clock unit */
-	clk_disable(keypad->clk);
 }
 
 static int ma35d1_keypad_probe(struct platform_device *pdev)
@@ -207,7 +198,6 @@ static int ma35d1_keypad_probe(struct platform_device *pdev)
 	struct ma35d1_keypad *keypad;
 	struct input_dev *input_dev;
 	struct resource *res;
-	int irq;
 	int error = 0;
 	u32 i;
 	struct clk *clk;
@@ -222,21 +212,21 @@ static int ma35d1_keypad_probe(struct platform_device *pdev)
 	}
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (res == NULL) {
+	if (!res) {
 		dev_err(&pdev->dev, "failed to get I/O memory\n");
 		error = -ENXIO;
 		goto failed_free;
 	}
 
 	res = request_mem_region(res->start, resource_size(res), pdev->name);
-	if (res == NULL) {
+	if (!res) {
 		dev_err(&pdev->dev, "failed to request I/O memory\n");
 		error = -EBUSY;
 		goto failed_free;
 	}
 
 	keypad->mmio_base = ioremap(res->start, resource_size(res));
-	if (keypad->mmio_base == NULL) {
+	if (!keypad->mmio_base) {
 		dev_err(&pdev->dev, "failed to remap I/O memory\n");
 		error = -ENXIO;
 		goto failed_free_res;
@@ -248,7 +238,6 @@ static int ma35d1_keypad_probe(struct platform_device *pdev)
 	input_dev->name = pdev->name;
 	input_dev->id.bustype = BUS_HOST;
 	input_dev->open = ma35d1_keypad_open;
-	input_dev->close = ma35d1_keypad_close;
 	input_dev->dev.parent = &pdev->dev;
 
 	/* Enable clock */
@@ -256,29 +245,34 @@ static int ma35d1_keypad_probe(struct platform_device *pdev)
 	if (IS_ERR(clk)) {
 		error = PTR_ERR(clk);
 		dev_err(&pdev->dev, "failed to get core clk: %d\n", error);
-		return -ENOENT;
+		error = -ENOENT;
+		goto failed_unmap;
 	}
 	error = clk_prepare_enable(clk);
-	if (error)
-		return -ENOENT;
+	if (error) {
+		clk_put(clk);
+		error = -ENOENT;
+		goto failed_unmap;
+	}
+	keypad->clk = clk;
 
 	error = matrix_keypad_parse_properties(&pdev->dev,
-					&(keypad->kpi_row), &(keypad->kpi_col));
+					       &keypad->kpi_row, &keypad->kpi_col);
 	if (error) {
 		dev_err(&pdev->dev, "failed to parse kp params\n");
-		return error;
+		goto failed_put_clk;
 	}
 
 	error = matrix_keypad_build_keymap(NULL, NULL, keypad->kpi_row,
-									keypad->kpi_col, NULL, input_dev);
+					   keypad->kpi_col, NULL, input_dev);
 	if (error) {
 		dev_err(&pdev->dev, "failed to build keymap\n");
 		goto failed_put_clk;
 	}
 
-	if (keypad->kpi_col == 0x0)
+	if (keypad->kpi_col == 0x0) {
 		keypad->mask_col = 0x0;
-	else {
+	} else {
 		keypad->mask_col = 1;
 		for (i = 0; i < keypad->kpi_col; i++)
 			keypad->mask_col = keypad->mask_col * 2;
@@ -295,13 +289,13 @@ static int ma35d1_keypad_probe(struct platform_device *pdev)
 	}
 
 	of_property_read_u32(pdev->dev.of_node, "debounce-period",
-									&(keypad->debounce_val));
+			     &keypad->debounce_val);
 
 	of_property_read_u32(pdev->dev.of_node, "pre-scale",
-									&(keypad->pre_scale));
+			     &keypad->pre_scale);
 
 	of_property_read_u32(pdev->dev.of_node, "pre-scalediv",
-									&(keypad->pre_scale_divider));
+			     &keypad->pre_scale_divider);
 
 	__set_bit(EV_REP, input_dev->evbit);
 	input_set_capability(input_dev, EV_MSC, MSC_SCAN);
@@ -318,16 +312,16 @@ static int ma35d1_keypad_probe(struct platform_device *pdev)
 	return 0;
 
 failed_free_irq:
-	free_irq(irq, pdev);
+	free_irq(keypad->irq, keypad);
 failed_put_clk:
-	clk_put(keypad->clk);
-
+	clk_disable_unprepare(clk);
+	clk_put(clk);
+failed_unmap:
 	iounmap(keypad->mmio_base);
 failed_free_res:
 	release_mem_region(res->start, resource_size(res));
 failed_free:
 	input_free_device(input_dev);
-	kfree(keypad);
 
 	dev_err(&pdev->dev, "probe failed\n");
 
@@ -339,8 +333,9 @@ static void ma35d1_keypad_remove(struct platform_device *pdev)
 	struct ma35d1_keypad *keypad = platform_get_drvdata(pdev);
 	struct resource *res;
 
-	free_irq(keypad->irq, pdev);
+	free_irq(keypad->irq, keypad);
 
+	clk_disable_unprepare(keypad->clk);
 	clk_put(keypad->clk);
 
 	input_unregister_device(keypad->input_dev);
@@ -350,11 +345,10 @@ static void ma35d1_keypad_remove(struct platform_device *pdev)
 	release_mem_region(res->start, resource_size(res));
 
 	platform_set_drvdata(pdev, NULL);
-	kfree(keypad);
 }
 
 static int ma35d1_keypad_suspend(struct platform_device *pdev,
-									pm_message_t state)
+				 pm_message_t state)
 {
 	struct ma35d1_keypad *keypad = platform_get_drvdata(pdev);
 
@@ -370,7 +364,7 @@ static int ma35d1_keypad_resume(struct platform_device *pdev)
 	struct ma35d1_keypad *keypad = platform_get_drvdata(pdev);
 
 	__raw_writel(__raw_readl(keypad->mmio_base + KPI_CONF) & ~(WAKEUP),
-					keypad->mmio_base + KPI_CONF);
+		     keypad->mmio_base + KPI_CONF);
 	disable_irq_wake(keypad->irq);
 
 	return 0;
@@ -391,7 +385,6 @@ static struct platform_driver ma35d1_keypad_driver = {
 	.resume		= ma35d1_keypad_resume,
 	.driver		= {
 		.name	= "ma35d1-kpi",
-		.owner	= THIS_MODULE,
 		.of_match_table = of_match_ptr(ma35d1_kpi_of_match),
 	},
 };

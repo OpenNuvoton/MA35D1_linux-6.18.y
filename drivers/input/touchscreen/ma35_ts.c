@@ -54,16 +54,16 @@
 /* ADC Tounc Z Pressure Mean Value Sort3 */
 #define REG_ADC_ZSORT3		(0x210)
 
-#define ADC_CTL_ADEN		(1 << 0)
-#define ADC_CTL_MST			(1 << 8)
-#define ADC_CTL_PEDEEN		(1 << 9)
-#define ADC_CTL_WKTEN		(1 << 11)
-#define ADC_CTL_WMSWCH		(1 << 16)
+#define ADC_CTL_ADEN		BIT(0)
+#define ADC_CTL_MST			BIT(8)
+#define ADC_CTL_PEDEEN		BIT(9)
+#define ADC_CTL_WKTEN		BIT(11)
+#define ADC_CTL_WMSWCH		BIT(16)
 
-#define ADC_CONF_TEN		(1 << 0)
-#define ADC_CONF_ZEN		(1 << 1)
-#define ADC_CONF_NACEN		(1 << 2)
-#define ADC_CONF_SPEED		(1 << 22)
+#define ADC_CONF_TEN		BIT(0)
+#define ADC_CONF_ZEN		BIT(1)
+#define ADC_CONF_NACEN		BIT(2)
+#define ADC_CONF_SPEED		BIT(22)
 
 #define ADC_CONF_CHSEL_POS	12
 #define ADC_CONF_CHSEL_MSK	(7 << 12)
@@ -72,20 +72,20 @@
 #define ADC_CONF_REFSEL_MSK	(3 << 6)
 #define ADC_CONF_REFSEL_AVDD	(3 << 6)
 
-#define ADC_IER_MIEN		(1 << 0)
-#define ADC_IER_PEDEIEN		(1 << 2)
-#define ADC_IER_WKTIEN		(1 << 3)
-#define ADC_IER_PEUEIEN		(1 << 6)
+#define ADC_IER_MIEN		BIT(0)
+#define ADC_IER_PEDEIEN		BIT(2)
+#define ADC_IER_WKTIEN		BIT(3)
+#define ADC_IER_PEUEIEN		BIT(6)
 
-#define ADC_ISR_MF			(1 << 0)
-#define ADC_ISR_PEDEF		(1 << 2)
-#define ADC_ISR_PEUEF		(1 << 4)
-#define ADC_ISR_TF			(1 << 8)
-#define ADC_ISR_ZF			(1 << 9)
-#define ADC_ISR_NACF		(1 << 10)
-#define ADC_ISR_INTTC		(1 << 17)
+#define ADC_ISR_MF			BIT(0)
+#define ADC_ISR_PEDEF		BIT(2)
+#define ADC_ISR_PEUEF		BIT(4)
+#define ADC_ISR_TF			BIT(8)
+#define ADC_ISR_ZF			BIT(9)
+#define ADC_ISR_NACF		BIT(10)
+#define ADC_ISR_INTTC		BIT(17)
 
-#define ADC_WKISR_WPEDEF	(1 << 1)
+#define ADC_WKISR_WPEDEF	BIT(1)
 
 #define ADC_CH_NUM			8
 #define ADC_RESOLUTION		12	// 12-bit data
@@ -96,6 +96,7 @@
 #define ADC_DEFAULT_CLK_RATE	1000000
 #define ADC_DEFAULT_P_THRESHOLD	20
 #define ADC_DEFAULT_C_TIME	10
+#define ADC_PENDOWN_SETTLE_US	100
 
 enum touch_state {
 	TS_STOP,	/* TS stop */
@@ -115,6 +116,7 @@ struct ma35d1_adc {
 	struct clk		*clk;
 	u32			clk_rate;
 
+	/* protects ts_state and the touch detection register sequences */
 	spinlock_t		lock;
 	struct tasklet_struct	ts_tasklet;
 	enum touch_state	ts_state;
@@ -148,7 +150,7 @@ static irqreturn_t ma35d1_adc_interrupt(int irq, void *private)
 	isr = __raw_readl(priv->base + REG_ADC_ISR);
 	wkisr = __raw_readl(priv->base + REG_ADC_WKISR);
 
-	if ((isr & ADC_ISR_PEUEF) && (priv->ts_type == 5)) {
+	if ((isr & ADC_ISR_PEUEF) && priv->ts_type == 5) {
 		if (priv->pu_handle) {
 			//printk("pen up!!\n");
 			priv->pu_handle = 0;
@@ -163,10 +165,12 @@ static irqreturn_t ma35d1_adc_interrupt(int irq, void *private)
 			if (priv->pd_handle == 1) {
 				if (isr != (ADC_ISR_PEDEF | ADC_ISR_PEUEF))
 					tasklet_schedule(&priv->ts_tasklet);
-			} else
+			} else {
 				priv->pd_handle++;
-		} else
+			}
+		} else {
 			tasklet_schedule(&priv->ts_tasklet);
+		}
 	}
 
 	if (wkisr & ADC_WKISR_WPEDEF)
@@ -217,10 +221,11 @@ static enum hrtimer_restart trigger_hrtimer(struct hrtimer *hrtimer)
 	unsigned long flags;
 
 	spin_lock_irqsave(&priv->lock, flags);
-	priv->pu_handle = priv->pd_handle = 0;
+	priv->pu_handle = 0;
+	priv->pd_handle = 0;
 
 	__raw_writel((__raw_readl(priv->base + REG_ADC_CTL) & ~ADC_CTL_PEDEEN) | ADC_CTL_MST,
-			priv->base + REG_ADC_CTL);
+		     priv->base + REG_ADC_CTL);
 	spin_unlock_irqrestore(&priv->lock, flags);
 
 	return HRTIMER_NORESTART;
@@ -235,7 +240,8 @@ static void detect_touch(struct ma35d1_adc *priv)
 	//printk("detect_touch\n");
 	priv->ts_state = TS_CONVERT;
 	/* Disable pen down detection*/
-	priv->pu_handle = priv->pd_handle = 0;
+	priv->pu_handle = 0;
+	priv->pd_handle = 0;
 	priv->touch_cnt = 3;
 
 	__raw_writel(__raw_readl(priv->base + REG_ADC_CTL) &
@@ -245,7 +251,7 @@ static void detect_touch(struct ma35d1_adc *priv)
 		__raw_writel((__raw_readl(priv->base + REG_ADC_CONF) & ~ADC_CONF_NACEN) |
 			ADC_CONF_TEN, priv->base + REG_ADC_CONF);
 		__raw_writel(__raw_readl(priv->base + REG_ADC_IER) | ADC_IER_MIEN,
-			priv->base + REG_ADC_IER);
+			     priv->base + REG_ADC_IER);
 	} else {
 		/* Enable touch detection  */
 		__raw_writel((__raw_readl(priv->base + REG_ADC_CONF) & ~ADC_CONF_NACEN) |
@@ -256,7 +262,7 @@ static void detect_touch(struct ma35d1_adc *priv)
 	}
 
 	hrtimer_start(&priv->trigger_hrt,
-			ms_to_ktime(ADC_TS_SPS),
+		      ms_to_ktime(ADC_TS_SPS),
 			HRTIMER_MODE_REL);
 
 	spin_unlock_irqrestore(&priv->lock, flags);
@@ -267,7 +273,8 @@ static void detect_pendown(struct ma35d1_adc *priv)
 	unsigned long flags, reg;
 
 	//printk("wait for pendown\n");
-	priv->ts_oldx = priv->ts_oldy = 0;
+	priv->ts_oldx = 0;
+	priv->ts_oldy = 0;
 
 	spin_lock_irqsave(&priv->lock, flags);
 	if (priv->ts_state == TS_CONVERT)
@@ -293,11 +300,12 @@ static void detect_pendown(struct ma35d1_adc *priv)
 	__raw_writel((__raw_readl(priv->base + REG_ADC_CTL) & ~ADC_CTL_WKTEN) |
 		reg, priv->base + REG_ADC_CTL);
 
-	udelay(100);
+	/* under priv->lock, cannot sleep */
+	udelay(ADC_PENDOWN_SETTLE_US);
 
 	/* Clear pen down/up interrupt status */
-	__raw_writel(ADC_ISR_PEDEF|ADC_ISR_PEUEF|ADC_ISR_TF|ADC_ISR_ZF,
-			priv->base + REG_ADC_ISR);
+	__raw_writel(ADC_ISR_PEDEF | ADC_ISR_PEUEF | ADC_ISR_TF | ADC_ISR_ZF,
+		     priv->base + REG_ADC_ISR);
 
 	/* Enable pendown Interrupt */
 	if (priv->ts_type == 5)
@@ -356,23 +364,22 @@ static void stop_detect(struct ma35d1_adc *priv)
 			priv->base + REG_ADC_CONF);
 	/* Disable pen down detection*/
 	__raw_writel(__raw_readl(priv->base + REG_ADC_CTL) & ~ADC_CTL_PEDEEN,
-			priv->base + REG_ADC_CTL);
+		     priv->base + REG_ADC_CTL);
 	/* Config Interrupt */
 	__raw_writel(__raw_readl(priv->base + REG_ADC_IER) & ~ADC_IER_PEDEIEN,
-			priv->base + REG_ADC_IER);
+		     priv->base + REG_ADC_IER);
 
 	spin_unlock_irqrestore(&priv->lock, flags);
 }
 
 static int report_touch(struct ma35d1_adc *priv)
 {
-	u32 x, y, z1, z2, p, reg, z_cnt = 0;
+	u32 x, y, z1, z2, p, reg;
 
 	reg = __raw_readl(priv->base + REG_ADC_XYDATA);
 	x = reg & ADC_DATA_MASK;
 	y = reg >> ADC_DATA_SHIFT;
 
-	//printk("x %d y %d, diffx %d diffy %d\n",x,y, abs(x - priv->ts_oldx), abs(y - priv->ts_oldy));
 	if (priv->ts_type == 5)	{
 		priv->pu_handle = 1;
 		__raw_writel((__raw_readl(priv->base + REG_ADC_CTL) &
@@ -409,34 +416,34 @@ static int report_touch(struct ma35d1_adc *priv)
 				0xfff) <= priv->p_th) {
 			priv->ts_old = 0;
 			input_report_key(priv->ts_dev, BTN_TOUCH, 0);
-			if (priv->ts_count++ > ((priv->ts_time*1000)/ADC_TS_SPS))
+			if (priv->ts_count++ > ((priv->ts_time * 1000) / ADC_TS_SPS))
 				detect_pendown(priv);
 			else
 				hrtimer_start(&priv->trigger_hrt,
-					ms_to_ktime(ADC_TS_SPS),
+					      ms_to_ktime(ADC_TS_SPS),
 					HRTIMER_MODE_REL);
 		} else {
 			u32 i, xdata, ydata;
 
-			z_cnt = 0;
 			for (i = 0; i <= 12; i += 4) {
 				reg = __raw_readl(priv->base + REG_ADC_XYSORT0 + i);
 				xdata = reg & ADC_DATA_MASK;
 				ydata = reg >> ADC_DATA_SHIFT;
 				if (xdata == 0 || xdata == 0xfff || ydata == 0 ||
-					ydata == 0xfff || abs(xdata-x) > 50 ||
-					abs(ydata-y) > 50) {
+				    ydata == 0xfff || abs(xdata - x) > 50 ||
+				    abs(ydata - y) > 50) {
 					hrtimer_start(&priv->trigger_hrt,
-						ms_to_ktime(1),
+						      ms_to_ktime(1),
 						HRTIMER_MODE_REL);
 					return true;
 				}
 			}
 
-			if ((priv->ts_old == 1) && (abs(priv->ts_oldx-x) > 0x200 ||
-				abs(priv->ts_oldy-y) > 0x200)) {
+			if (priv->ts_old == 1 &&
+			    (abs(priv->ts_oldx - x) > 0x200 ||
+			     abs(priv->ts_oldy - y) > 0x200)) {
 				hrtimer_start(&priv->trigger_hrt,
-					ms_to_ktime(1),
+					      ms_to_ktime(1),
 					HRTIMER_MODE_REL);
 				return true;
 			}
@@ -449,7 +456,7 @@ static int report_touch(struct ma35d1_adc *priv)
 			input_report_abs(priv->ts_dev, ABS_Y, y);
 			input_report_abs(priv->ts_dev, ABS_PRESSURE, p);
 			hrtimer_start(&priv->trigger_hrt,
-					ms_to_ktime(ADC_TS_SPS),
+				      ms_to_ktime(ADC_TS_SPS),
 					HRTIMER_MODE_REL);
 		}
 		input_sync(priv->ts_dev);
@@ -495,11 +502,11 @@ static int ma35d1_ts_register(struct platform_device *pdev)
 
 	input_set_capability(ts_dev, EV_KEY, BTN_TOUCH);
 	input_set_abs_params(ts_dev, ABS_X, 0,
-		(1 << ADC_RESOLUTION) - 1, 0, 0);
+			     (1 << ADC_RESOLUTION) - 1, 0, 0);
 	input_set_abs_params(ts_dev, ABS_Y, 0,
-		(1 << ADC_RESOLUTION) - 1, 0, 0);
+			     (1 << ADC_RESOLUTION) - 1, 0, 0);
 	input_set_abs_params(ts_dev, ABS_PRESSURE, 0,
-		(1 << ADC_RESOLUTION) - 1, 0, 0);
+			     (1 << ADC_RESOLUTION) - 1, 0, 0);
 	input_set_drvdata(ts_dev, priv);
 
 	ret = input_register_device(ts_dev);
@@ -565,11 +572,11 @@ static void normal_convert(struct ma35d1_adc *priv, int ch)
 }
 
 static int ma35d1_adc_read_raw(struct iio_dev *idev,
-			     struct iio_chan_spec const *chan,
+			       struct iio_chan_spec const *chan,
 			     int *val, int *val2, long mask)
 {
 	struct ma35d1_adc *priv = iio_device_get_drvdata(idev);
-	unsigned long timeout;
+	long timeout;
 
 	if (mask != IIO_CHAN_INFO_RAW)
 		return -EINVAL;
@@ -577,8 +584,8 @@ static int ma35d1_adc_read_raw(struct iio_dev *idev,
 	reinit_completion(&priv->completion);
 	normal_convert(priv, chan->channel);
 
-	timeout = wait_for_completion_interruptible_timeout(
-		&priv->completion, ADC_CONV_TIMEOUT);
+	timeout = wait_for_completion_interruptible_timeout(&priv->completion,
+							    ADC_CONV_TIMEOUT);
 
 	*val = __raw_readl(priv->base + REG_ADC_DATA);
 
@@ -588,6 +595,9 @@ static int ma35d1_adc_read_raw(struct iio_dev *idev,
 		detect_pendown(priv);
 	else if (priv->ts_state == TS_CONVERT)
 		detect_touch(priv);
+
+	if (timeout < 0)
+		return timeout;
 
 	if (timeout == 0)
 		return -ETIMEDOUT;
@@ -608,7 +618,7 @@ static int ma35d1_iio_register(struct platform_device *pdev)
 	unsigned long mask;
 
 	indio_dev = devm_iio_device_alloc(&pdev->dev, 0);
-	if (indio_dev == NULL) {
+	if (!indio_dev) {
 		dev_err(&pdev->dev, "failed to allocate iio device\n");
 		return -ENOMEM;
 	}
@@ -630,7 +640,7 @@ static int ma35d1_iio_register(struct platform_device *pdev)
 	indio_dev->num_channels = bitmap_weight(&mask, ADC_CH_NUM);
 
 	chan_array = devm_kzalloc(&pdev->dev,
-					(indio_dev->num_channels *
+				  (indio_dev->num_channels *
 					sizeof(struct iio_chan_spec)),
 					GFP_KERNEL);
 
@@ -672,7 +682,7 @@ static int ma35d1_iio_unregister(struct platform_device *pdev)
 
 // IIO related function ends here
 static int ma35d1_adc_probe_dt(struct ma35d1_adc *priv,
-			     struct platform_device *pdev)
+			       struct platform_device *pdev)
 {
 	struct device_node *node = pdev->dev.of_node;
 
@@ -686,26 +696,25 @@ static int ma35d1_adc_probe_dt(struct ma35d1_adc *priv,
 	if (priv->enable_ts) {
 		if (of_property_read_u32(node, "ts-type", &priv->ts_type)) {
 			dev_warn(&pdev->dev,
-				"Missing ts-type property in the DT, select 4-wire mode\n");
+				 "Missing ts-type property in the DT, select 4-wire mode\n");
 			priv->ts_type = 4;
-
 		}
 		//printk("=======> priv->ts_type %d\n",priv->ts_type);
 		if (of_property_read_u32(node, "ts-pressure-threshold",
-			&priv->p_th)) {
+					 &priv->p_th)) {
 			dev_info(&pdev->dev,
-				"Use default pressure threshold select\n");
+				 "Use default pressure threshold select\n");
 			priv->p_th = ADC_DEFAULT_P_THRESHOLD;
-
 		}
 		if (of_property_read_u32(node, "ts-convert-time",
-			&priv->ts_time)) {
+					 &priv->ts_time)) {
 			dev_info(&pdev->dev,
-				"Use default convert delay time\n");
+				 "Use default convert delay time\n");
 			priv->ts_time = ADC_DEFAULT_C_TIME;
 		}
-	} else
+	} else {
 		priv->ts_type = 0;
+	}
 
 	priv->clk = devm_clk_get(&pdev->dev, "adc_gate");
 	if (IS_ERR(priv->clk))
@@ -713,7 +722,7 @@ static int ma35d1_adc_probe_dt(struct ma35d1_adc *priv,
 
 	if (of_property_read_u32(node, "clock-rate", &priv->clk_rate)) {
 		dev_warn(&pdev->dev,
-			"Missing clock-rate in the DT, set to 1MHz\n");
+			 "Missing clock-rate in the DT, set to 1MHz\n");
 		priv->clk_rate = ADC_DEFAULT_CLK_RATE;
 	}
 
@@ -768,17 +777,16 @@ static int ma35d1_adc_probe(struct platform_device *pdev)
 	__raw_writel(0, priv->base + REG_ADC_IER);
 
 	ret = devm_request_irq(&pdev->dev, priv->irq, ma35d1_adc_interrupt,
-				0, dev_name(dev), priv);
+			       0, dev_name(dev), priv);
 	if (ret) {
 		dev_err(dev, "Failed to request irq\n");
 		return ret;
 	}
 
-
 	hrtimer_setup(&priv->trigger_hrt, trigger_hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 
 	tasklet_init(&priv->ts_tasklet,
-		(void *)ma35d1adc_ts_tasklet,
+		     (void *)ma35d1adc_ts_tasklet,
 		(unsigned long)priv);
 
 	spin_lock_init(&priv->lock);
