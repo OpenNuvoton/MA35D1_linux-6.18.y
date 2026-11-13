@@ -8,6 +8,7 @@
 #include <linux/dma-mapping.h>
 #include <linux/delay.h>
 #include <linux/errno.h>
+#include <linux/iopoll.h>
 #include <linux/fs.h>
 #include <linux/i2c.h>
 #include <linux/init.h>
@@ -68,40 +69,40 @@
 
 #define INFMT_YCbCr  0x0	/*  Sensor Input Data Format YCbCr422 */
 #define INFMT_RGB565 0x1	/*  Sensor Input Data Format RGB565 */
-#define INTYPE_CCIR601 (0x0<<1)	/*  Sensor Input Type CCIR601 */
-#define INTYPE_CCIR656 (0x1<<1)	/*  Sensor Input Type CCIR656 */
-#define INORD_YUYV  (0x0<<2)	/*  Sensor Input Data Order YUYV */
-#define INORD_YVYU  (0x1<<2)	/*  Sensor Input Data Order YVYU */
-#define INORD_UYVY  (0x2<<2)	/*  Sensor Input Data Order UYVY */
-#define INORD_VYUY  (0x3<<2)	/*  Sensor Input Data Order VYUY */
-#define INORD_RGGB  (0x0<<2)	/*  Sensor Input Data Order RGGB */
-#define INORD_BGGR  (0x1<<2)	/*  Sensor Input Data Order BGGR */
-#define INORD_GBRG  (0x2<<2)	/*  Sensor Input Data Order GBRG */
-#define INORD_GRBG  (0x3<<2)	/*  Sensor Input Data Order GRBG */
+#define INTYPE_CCIR601 (0x0 << 1)	/*  Sensor Input Type CCIR601 */
+#define INTYPE_CCIR656 (0x1 << 1)	/*  Sensor Input Type CCIR656 */
+#define INORD_YUYV  (0x0 << 2)	/*  Sensor Input Data Order YUYV */
+#define INORD_YVYU  (0x1 << 2)	/*  Sensor Input Data Order YVYU */
+#define INORD_UYVY  (0x2 << 2)	/*  Sensor Input Data Order UYVY */
+#define INORD_VYUY  (0x3 << 2)	/*  Sensor Input Data Order VYUY */
+#define INORD_RGGB  (0x0 << 2)	/*  Sensor Input Data Order RGGB */
+#define INORD_BGGR  (0x1 << 2)	/*  Sensor Input Data Order BGGR */
+#define INORD_GBRG  (0x2 << 2)	/*  Sensor Input Data Order GBRG */
+#define INORD_GRBG  (0x3 << 2)	/*  Sensor Input Data Order GRBG */
 
 #define INMASK 0xF		/*  Sensor Input Mask */
-#define OUTFMT_YUV422	(0x0<<4)
-#define OUTFMT_Y	(0x1<<4)
-#define OUTFMT_RGB555	(0x2<<4)
-#define OUTFMT_RGB565	(0x3<<4)
+#define OUTFMT_YUV422	(0x0 << 4)
+#define OUTFMT_Y	(0x1 << 4)
+#define OUTFMT_RGB555	(0x2 << 4)
+#define OUTFMT_RGB565	(0x3 << 4)
 
-#define PLNFMT_YUV422	(0x0<<7)
-#define PLNFMT_YUV420	(0x1<<7)
+#define PLNFMT_YUV422	(0x0 << 7)
+#define PLNFMT_YUV420	(0x1 << 7)
 
 /* Mirror addresses are not available for all registers */
 #define CCAP_CTL		0x00
-#define CTL_UPDATE		(1<<20)
-#define CTL_BAYER_10		(1<<21)
+#define CTL_UPDATE		BIT(20)
+#define CTL_BAYER_10		BIT(21)
 #define CCAP_PAR		0x04
-#define PAR_INFMT		(1<<0)
-#define PAR_SENTYPE		(1<<1)
+#define PAR_INFMT		BIT(0)
+#define PAR_SENTYPE		BIT(1)
 #define CCAP_INT		0x08
-#define VIEN			(1<<16)
-#define VINTF			(1<<0)
+#define VIEN			BIT(16)
+#define VINTF			BIT(0)
 #define CCAP_POSTERIZE		0x0c
 #define CCAP_CWSP		0x20
-#define CWSP_CWSADDRV		(0x3F<<16)
-#define CWSP_CWSADDRH		(0x3F<<0)
+#define CWSP_CWSADDRV		(0x3F << 16)
+#define CWSP_CWSADDRH		(0x3F << 0)
 #define CCAP_CWS		0x24
 #define CCAP_PKTSL		0x28
 #define PKTSL_PKTSVNL		(0xFF << 24)
@@ -142,8 +143,10 @@ enum ccap_status {
 #define CCAP_MIN_IMAGE_HEIGHT	16U
 #define CCAP_MAX_IMAGE_HEIGHT	4096U
 
+#define CCAP_FRAME_TIMEOUT_US	500000
+
 #define sensor_call(cam, o, f, args...) \
-	v4l2_subdev_call(cam->sensor, o, f, ##args)
+	v4l2_subdev_call((cam)->sensor, o, f, ##args)
 
 struct ccap_buffer {
 	struct vb2_v4l2_buffer vb;
@@ -234,6 +237,7 @@ struct ccap_device {
 	struct device *dev;
 	struct v4l2_device v4l2_dev;
 	struct video_device *vdev;
+	/* protects buf_list and next_buffer against the interrupt handler */
 	spinlock_t lock;
 	void __iomem *base;
 	/* State information */
@@ -245,6 +249,7 @@ struct ccap_device {
 	struct ccap_buffer *active;
 	enum ccap_status status;
 	unsigned int sequence;
+	/* serializes file operations and vb2 queue access */
 	struct mutex fop_lock;
 	struct ccap_data *pdata;
 
@@ -479,7 +484,6 @@ static inline void ccap_schedule_next(struct ccap_device *ccap_dev, struct vb2_v
 	/* Update New frame */
 	ccap_reg_write(ccap_dev, CCAP_CTL,
 		       ccap_reg_read(ccap_dev, CCAP_CTL) | CTL_UPDATE);
-
 }
 
 /* Locking: caller holds fop_lock mutex */
@@ -529,7 +533,6 @@ static void ccap_buf_queue(struct vb2_buffer *vb)
 	spin_lock_irqsave(&ccap_dev->lock, flags);
 	list_add_tail(&cbuf->list, &ccap_dev->buf_list);
 	spin_unlock_irqrestore(&ccap_dev->lock, flags);
-
 }
 
 static int ccap_start_streaming(struct vb2_queue *vq, unsigned int count)
@@ -598,8 +601,10 @@ static void ccap_stop_streaming(struct vb2_queue *vq)
 		ccap_reg_write(ccap_dev, CCAP_CTL, value);
 
 		/* waiting for the current frame complete */
-		while (ccap_reg_read(ccap_dev, CCAP_CTL) & 0x1)
-			udelay(10);
+		if (read_poll_timeout(ccap_reg_read, value, !(value & 0x1),
+				      10, CCAP_FRAME_TIMEOUT_US, false,
+				      ccap_dev, CCAP_CTL))
+			dev_warn(ccap_dev->dev, "timeout waiting for frame complete\n");
 
 		value = ccap_reg_read(ccap_dev, CCAP_CTL) | ~((1 << 6) | (1 << 5));
 		ccap_reg_write(ccap_dev, CCAP_CTL, value);
@@ -682,7 +687,6 @@ static int ccap_formats_init(struct ccap_device *ccap)
 static int ccap_querycap(struct file *file, void *priv,
 			 struct v4l2_capability *cap)
 {
-
 	cap->capabilities = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE |
 	    V4L2_CAP_VIDEO_OVERLAY | V4L2_CAP_STREAMING | V4L2_CAP_DEVICE_CAPS;
 
@@ -697,7 +701,6 @@ static int ccap_querycap(struct file *file, void *priv,
 static int ccap_enum_fmt_vid_cap(struct file *file,
 				 void *priv, struct v4l2_fmtdesc *fmt)
 {
-
 	if (fmt->index >= ARRAY_SIZE(ccap_fmt))
 		return -EINVAL;
 
@@ -759,8 +762,9 @@ static int ccap_try_fmt_vid_cap(struct file *file, void *priv,
 			parameter |= OUTFMT_Y;
 		} else if (pix->pixelformat == V4L2_PIX_FMT_RGB555) {
 			parameter |= OUTFMT_RGB555 | INORD_RGGB;
-		} else if (pix->pixelformat == V4L2_PIX_FMT_RGB565)
+		} else if (pix->pixelformat == V4L2_PIX_FMT_RGB565) {
 			parameter |= OUTFMT_RGB565 | INORD_RGGB;
+		}
 
 		if (ccap_dev->sd_format->mbus_code == MEDIA_BUS_FMT_RGB565_2X8_LE)
 			parameter |= INFMT_RGB565;
@@ -889,7 +893,7 @@ static int ccap_try_fmt_vid_cap(struct file *file, void *priv,
 		/* Frame Output Pixel Stride Width Register(Planar) */
 		value = (ccap_reg_read(ccap_dev, CCAP_STRIDE) &
 			~STRIDE_PLNSTRIDE) | ((pix->bytesperline / 2) << 16);
-			ccap_reg_write(ccap_dev, CCAP_STRIDE, value);
+		ccap_reg_write(ccap_dev, CCAP_STRIDE, value);
 
 		ccap_dev->pdata->planar = 1;
 		break;
@@ -976,8 +980,8 @@ static irqreturn_t ccap_isr(int irq, void *dev_id)
 		return IRQ_HANDLED;
 	}
 
-	if (!list_is_singular(&ccap_dev->buf_list)
-	    && (ccap_dev->next_buffer == 0)) {
+	if (!list_is_singular(&ccap_dev->buf_list) &&
+	    ccap_dev->next_buffer == 0) {
 		vb = list_entry(ccap_dev->buf_list.next, struct ccap_buffer, list);
 		ccap_schedule_next(ccap_dev, &vb->vb);
 		ccap_dev->next_buffer = 1;
@@ -1132,7 +1136,7 @@ static int ccap_s_fmt_vid_cap(struct file *file, void *priv,
 	struct ccap_device *ccap_dev = video_drvdata(file);
 	int ret;
 
-	dev_dbg(ccap_dev->dev, "width %d, heigth %d\n", fmt->fmt.pix.width,
+	dev_dbg(ccap_dev->dev, "width %d, height %d\n", fmt->fmt.pix.width,
 		fmt->fmt.pix.height);
 	memcpy(&ccap_dev->fmt, fmt, sizeof(struct v4l2_format));
 	ccap_set_fmt(ccap_dev, &ccap_dev->fmt);
@@ -1185,7 +1189,6 @@ static void ccap_sensor_unbind(struct v4l2_async_notifier *notifier,
 			       struct v4l2_subdev *subdev,
 			       struct v4l2_async_connection *asd)
 {
-
 	struct ccap_device *ccap = notifier_to_ccap(notifier);
 
 	dev_dbg(ccap->dev, "Removing %s\n", video_device_node_name(ccap->vdev));
@@ -1339,7 +1342,6 @@ static int ccap_framesizes_init(struct ccap_device *ccap)
 
 static int ccap_sensor_complete(struct v4l2_async_notifier *notifier)
 {
-
 	struct ccap_device *ccap = notifier_to_ccap(notifier);
 	int ret;
 
@@ -1382,7 +1384,6 @@ static int ccap_sensor_complete(struct v4l2_async_notifier *notifier)
 	}
 
 	return 0;
-
 }
 
 /* File operations */
@@ -1469,17 +1470,6 @@ static const struct v4l2_file_operations ccap_fops = {
 	.write = vb2_fop_write,
 };
 
-static const struct video_device ccap_video_template = {
-	.name = "ma35d1_ccap",
-	.fops = &ccap_fops,
-	.ioctl_ops = &ccap_ioctl_ops,
-	/* PAL only supported in 8-bit non-bt656 mode */
-	.tvnorms = V4L2_STD_525_60,
-	.vfl_dir = VFL_DIR_RX,
-	.device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE |
-	    V4L2_CAP_STREAMING,
-};
-
 static int ccap_data_from_dt(struct platform_device *pdev,
 			     struct ccap_device *ccap_dev)
 {
@@ -1499,14 +1489,14 @@ static int ccap_data_from_dt(struct platform_device *pdev,
 	}
 
 	err = v4l2_fwnode_endpoint_parse(of_fwnode_handle(np), &ep);
+	of_node_put(np);
 	if (err) {
 		pr_info("could not parse endpoint\n");
 		return -EINVAL;
 	}
 
-	if (!
-	    ((ep.bus_type == V4L2_MBUS_BT656)
-	     || (ep.bus_type == V4L2_MBUS_PARALLEL))) {
+	if (ep.bus_type != V4L2_MBUS_BT656 &&
+	    ep.bus_type != V4L2_MBUS_PARALLEL) {
 		pr_info("Unsupported media bus type: 0x%x\n", ep.bus_type);
 		return -EINVAL;
 	}
@@ -1649,7 +1639,9 @@ static int ccap_probe(struct platform_device *pdev)
 	}
 
 	vdev = ccap_dev->vdev;
-	ccap_data_from_dt(pdev, ccap_dev);
+	ret = ccap_data_from_dt(pdev, ccap_dev);
+	if (ret)
+		goto evfreevdev;
 
 	vdev->v4l2_dev = &ccap_dev->v4l2_dev;
 	vdev->release = video_device_release_empty;
@@ -1673,7 +1665,7 @@ static int ccap_probe(struct platform_device *pdev)
 				     1, &ccap_dev->vid_cap_pad);
 	if (ret) {
 		dev_err(ccap_dev->dev, "Failed to init media entity pad\n");
-		return ret;
+		goto evfreevdev;
 	}
 	ccap_dev->vdev->entity.flags |= MEDIA_ENT_FL_DEFAULT;
 
@@ -1691,7 +1683,7 @@ static int ccap_probe(struct platform_device *pdev)
 	q->dev = &pdev->dev;
 	ret = vb2_queue_init(q);
 	if (ret)
-		goto evregdev;
+		goto evfreevdev;
 
 	vdev->queue = q;
 	INIT_LIST_HEAD(&ccap_dev->buf_list);
@@ -1699,14 +1691,18 @@ static int ccap_probe(struct platform_device *pdev)
 	pm_runtime_resume(&pdev->dev);
 	ret = video_register_device(vdev, VFL_TYPE_VIDEO, -1);
 	if (ret < 0)
-		goto evregdev;
+		goto evfreevdev;
 
 	ret = ccap_graph_init(ccap_dev);
-	if (ret < 0)
+	if (ret < 0) {
+		video_unregister_device(vdev);
 		goto evregdev;
+	}
 
 	return 0;
 
+evfreevdev:
+	video_device_release(vdev);
 evregdev:
 	pm_runtime_disable(&pdev->dev);
 	v4l2_device_unregister(&ccap_dev->v4l2_dev);
