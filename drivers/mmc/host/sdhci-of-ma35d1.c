@@ -28,10 +28,12 @@
 #define  BURST_INCR8_EN 0x4
 #define  BURST_INCR4_EN 0x2
 #define  UNDEFL_INCR_EN 0x1
-#define SDH1VSTB (1<<17)
+#define SDH1VSTB BIT(17)
 
-#define BOUNDARY_OK(addr, len) \
-	((addr | (SZ_128M - 1)) == ((addr + len - 1) | (SZ_128M - 1)))
+static inline bool ma35d1_boundary_ok(dma_addr_t addr, int len)
+{
+	return (addr | (SZ_128M - 1)) == ((addr + len - 1) | (SZ_128M - 1));
+}
 
 struct ma35d1_priv {
 	struct clk	*bus_clk;
@@ -47,11 +49,11 @@ struct ma35d1_priv {
  * so that each DMA transfer doesn't exceed the boundary.
  */
 static void ma35d1_adma_write_desc(struct sdhci_host *host, void **desc,
-				    dma_addr_t addr, int len, unsigned int cmd)
+				   dma_addr_t addr, int len, unsigned int cmd)
 {
 	int tmplen, offset;
 
-	if (likely(!len || BOUNDARY_OK(addr, len))) {
+	if (likely(!len || ma35d1_boundary_ok(addr, len))) {
 		sdhci_adma_write_desc(host, desc, addr, len, cmd);
 		return;
 	}
@@ -66,28 +68,28 @@ static void ma35d1_adma_write_desc(struct sdhci_host *host, void **desc,
 }
 
 static int ma35d1_sdhci_init_pinctrl(struct device *dev,
-					 struct ma35d1_priv *ma35d1_priv)
+				     struct ma35d1_priv *ma35d1_priv)
 {
 	ma35d1_priv->pinctrl = devm_pinctrl_get(dev);
 	if (IS_ERR(ma35d1_priv->pinctrl)) {
-		dev_dbg(dev, "No pinctrl info, err: %ld\n",
-			PTR_ERR(ma35d1_priv->pinctrl));
-		return -1;
+		dev_dbg(dev, "No pinctrl info, err: %pe\n",
+			ma35d1_priv->pinctrl);
+		return PTR_ERR(ma35d1_priv->pinctrl);
 	}
 
 	ma35d1_priv->pinctrl_state_3v3 =
 		pinctrl_lookup_state(ma35d1_priv->pinctrl, "sdhci_3V3");
 	if (IS_ERR(ma35d1_priv->pinctrl_state_3v3)) {
 		dev_warn(dev, "Missing 3.3V pad state\n");
-		return -1;
+		return PTR_ERR(ma35d1_priv->pinctrl_state_3v3);
 	}
 
 	ma35d1_priv->pinctrl_state_1v8 =
 		pinctrl_lookup_state(ma35d1_priv->pinctrl, "sdhci_1V8");
 	if (IS_ERR(ma35d1_priv->pinctrl_state_1v8)) {
-		dev_warn(dev, "Missing 1.8V pad state, err: %ld\n",
-			 PTR_ERR(ma35d1_priv->pinctrl_state_1v8));
-		return -1;
+		dev_warn(dev, "Missing 1.8V pad state, err: %pe\n",
+			 ma35d1_priv->pinctrl_state_1v8);
+		return PTR_ERR(ma35d1_priv->pinctrl_state_1v8);
 	}
 	return 0;
 }
@@ -104,19 +106,19 @@ static int ma35d1_sdhci_set_padctrl(struct sdhci_host *host, int voltage)
 
 	if (voltage == MMC_SIGNAL_VOLTAGE_180) {
 		ret = pinctrl_select_state(ma35d1_priv->pinctrl,
-					ma35d1_priv->pinctrl_state_1v8);
+					   ma35d1_priv->pinctrl_state_1v8);
 		if (ret < 0)
 			dev_err(mmc_dev(host->mmc),
 				"setting 1.8V failed, ret: %d\n", ret);
 	} else {
 		ret = pinctrl_select_state(ma35d1_priv->pinctrl,
-					ma35d1_priv->pinctrl_state_3v3);
+					   ma35d1_priv->pinctrl_state_3v3);
 		if (ret < 0)
 			dev_err(mmc_dev(host->mmc),
 				"setting 3.3V failed, ret: %d\n", ret);
 	}
 
-	return 0;
+	return ret < 0 ? ret : 0;
 }
 
 static void ma35d1_voltage_switch(struct sdhci_host *host)
@@ -137,7 +139,7 @@ static void ma35d1_voltage_switch(struct sdhci_host *host)
 }
 
 static int ma35d1_start_signal_voltage_switch(struct mmc_host *mmc,
-							struct mmc_ios *ios)
+					      struct mmc_ios *ios)
 {
 	struct sdhci_host *host = mmc_priv(mmc);
 	int ret = 0;
@@ -154,9 +156,11 @@ static void ma35d1_set_clock(struct sdhci_host *host, unsigned int clock)
 {
 	/* If clock > 100MHz, Need to set CMD_CONFIG_CHECK = 0 */
 	if (clock > 100000000)
-		sdhci_writew(host, sdhci_readw(host, MSHC_CTRL)&~CMD_CONFLICT_CHECK, MSHC_CTRL);
+		sdhci_writew(host, sdhci_readw(host, MSHC_CTRL) & ~CMD_CONFLICT_CHECK,
+			     MSHC_CTRL);
 	else
-		sdhci_writew(host, sdhci_readw(host, MSHC_CTRL)|CMD_CONFLICT_CHECK, MSHC_CTRL);
+		sdhci_writew(host, sdhci_readw(host, MSHC_CTRL) | CMD_CONFLICT_CHECK,
+			     MSHC_CTRL);
 	sdhci_set_clock(host, clock);
 }
 
@@ -180,24 +184,26 @@ static int ma35d1_execute_tuning(struct mmc_host *mmc, u32 opcode)
 			SDHCI_TIMEOUT_CONTROL,
 		};
 
-		for (idx = 0; idx < (REG_RESTORE_NUM-1); idx++)
+		for (idx = 0; idx < (REG_RESTORE_NUM - 1); idx++)
 			value[idx] = sdhci_readl(host, reg[idx]);
-		value[(REG_RESTORE_NUM-1)] = sdhci_readb(host, reg[(REG_RESTORE_NUM-1)]);
+		value[REG_RESTORE_NUM - 1] = sdhci_readb(host, reg[REG_RESTORE_NUM - 1]);
 
 		reset_control_assert(priv->rst);
 		reset_control_deassert(priv->rst);
 
-		for (idx = 0; idx < (REG_RESTORE_NUM-1); idx++)
+		for (idx = 0; idx < (REG_RESTORE_NUM - 1); idx++)
 			sdhci_writel(host, value[idx], reg[idx]);
-		sdhci_writeb(host, value[(REG_RESTORE_NUM-1)], reg[(REG_RESTORE_NUM-1)]);
+		sdhci_writeb(host, value[REG_RESTORE_NUM - 1], reg[REG_RESTORE_NUM - 1]);
 
-		sdhci_writew(host, sdhci_readw(host, MSHC_CTRL)&~CMD_CONFLICT_CHECK, MSHC_CTRL);
-		sdhci_writew(host, (sdhci_readw(host, MBIU_CTRL)&~BURST_INCR_MASK)|
-				(BURST_INCR8_EN|BURST_INCR16_EN), MBIU_CTRL);
+		sdhci_writew(host, sdhci_readw(host, MSHC_CTRL) & ~CMD_CONFLICT_CHECK,
+			     MSHC_CTRL);
+		sdhci_writew(host, (sdhci_readw(host, MBIU_CTRL) & ~BURST_INCR_MASK) |
+				   (BURST_INCR8_EN | BURST_INCR16_EN), MBIU_CTRL);
 	}
 
 	return sdhci_execute_tuning(mmc, opcode);
 }
+
 static const struct sdhci_ops sdhci_ma35d1_ops = {
 	.set_clock		= ma35d1_set_clock,
 	.set_bus_width		= sdhci_set_bus_width,
@@ -227,12 +233,12 @@ static void ma35d1_shutdown(struct platform_device *pdev)
 	ma35d1_reg_lock();
 }
 
-
 static int ma35d1_probe(struct platform_device *pdev)
 {
 	struct sdhci_pltfm_host *pltfm_host;
 	struct sdhci_host *host;
 	struct ma35d1_priv *priv;
+	struct device_node *np = pdev->dev.of_node;
 	int err;
 	u32 extra;
 
@@ -257,18 +263,19 @@ static int ma35d1_probe(struct platform_device *pdev)
 		return dev_err_probe(&pdev->dev, PTR_ERR(pltfm_host->clk),
 				     "failed to get and enable core clk\n");
 
-	priv->bus_clk = devm_clk_get(&pdev->dev, "bus");
-	if (!IS_ERR(priv->bus_clk))
-		clk_prepare_enable(priv->bus_clk);
+	priv->bus_clk = devm_clk_get_optional_enabled(&pdev->dev, "bus");
+	if (IS_ERR(priv->bus_clk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(priv->bus_clk),
+				     "failed to get and enable bus clk\n");
 
 	err = mmc_of_parse(host->mmc);
 	if (err)
-		goto err_clk;
+		return err;
 
 	priv->rst = devm_reset_control_get(&pdev->dev, NULL);
-	if (IS_ERR(priv->rst))
+	if (IS_ERR(priv->rst)) {
 		dev_err(&pdev->dev, "Error: Missing sdhci controller reset\n");
-	else {
+	} else {
 		reset_control_assert(priv->rst);
 		reset_control_deassert(priv->rst);
 	}
@@ -278,14 +285,11 @@ static int ma35d1_probe(struct platform_device *pdev)
 	if (!(host->quirks2 & SDHCI_QUIRK2_NO_1_8_V)) {
 		int reg;
 
-		priv->regmap = syscon_regmap_lookup_by_phandle(
-				pdev->dev.of_node, "nuvoton,ma35d1-sys");
+		priv->regmap = syscon_regmap_lookup_by_phandle(np, "nuvoton,ma35d1-sys");
 		if (IS_ERR(priv->regmap))
-			priv->regmap = syscon_regmap_lookup_by_phandle(
-					pdev->dev.of_node, "nuvoton,ma35d0-sys");
+			priv->regmap = syscon_regmap_lookup_by_phandle(np, "nuvoton,ma35d0-sys");
 		if (IS_ERR(priv->regmap))
-			priv->regmap = syscon_regmap_lookup_by_phandle(
-					pdev->dev.of_node, "nuvoton,ma35h0-sys");
+			priv->regmap = syscon_regmap_lookup_by_phandle(np, "nuvoton,ma35h0-sys");
 
 		if (IS_ERR(priv->regmap)) {
 			dev_err(&pdev->dev, "Error: Missing sys regmap\n");
@@ -307,18 +311,13 @@ static int ma35d1_probe(struct platform_device *pdev)
 	host->mmc_host_ops.execute_tuning = ma35d1_execute_tuning;
 	err = sdhci_add_host(host);
 	if (err)
-		goto err_clk;
+		return err;
 
 	/* Enable INCR16 and INCR8 */
-	sdhci_writew(host, (sdhci_readw(host, MBIU_CTRL)&~BURST_INCR_MASK)|(BURST_INCR8_EN|BURST_INCR16_EN), MBIU_CTRL);
+	sdhci_writew(host, (sdhci_readw(host, MBIU_CTRL) & ~BURST_INCR_MASK) |
+			   (BURST_INCR8_EN | BURST_INCR16_EN), MBIU_CTRL);
 
 	return 0;
-
-err_clk:
-	clk_disable_unprepare(pltfm_host->clk);
-	clk_disable_unprepare(priv->bus_clk);
-
-	return err;
 }
 
 static const struct of_device_id sdhci_ma35d1_dt_ids[] = {
