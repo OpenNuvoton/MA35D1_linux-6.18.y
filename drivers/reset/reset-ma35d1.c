@@ -27,63 +27,62 @@ struct ma35d1_reboot_data {
 };
 
 static int ma35d1_restart_handler(struct notifier_block *this,
-				unsigned long mode, void *cmd)
+				  unsigned long mode, void *cmd)
 {
 	struct ma35d1_reboot_data *data =
-			container_of(this, struct ma35d1_reboot_data,
-					restart_handler);
+		container_of(this, struct ma35d1_reboot_data, restart_handler);
+
 	ma35d1_reg_unlock();
-	regmap_write(data->regmap, REG_SYS_IPRST0, 1 << MA35D1_RESET_CHIP);
+	regmap_write(data->regmap, REG_SYS_IPRST0, BIT(MA35D1_RESET_CHIP));
 	ma35d1_reg_lock();
 	mdelay(1000);
 
 	return NOTIFY_DONE;
 }
 
-
 static int ma35d1_reset_update(struct reset_controller_dev *rcdev,
-			      unsigned long id, bool assert)
+			       unsigned long id, bool assert)
 {
 	struct ma35d1_reset_data *data = container_of(rcdev, struct ma35d1_reset_data, rcdev);
-	int reg;
+	unsigned int reg;
 	int offset = (id / RST_PRE_REG) * 4;
 
 	ma35d1_reg_unlock();
 	regmap_read(data->regmap, REG_SYS_IPRST0 + offset, &reg);
 	if (assert)
-		reg |= 1 << (id % RST_PRE_REG);
+		reg |= BIT(id % RST_PRE_REG);
 	else
-		reg &= ~(1 << (id % RST_PRE_REG));
+		reg &= ~BIT(id % RST_PRE_REG);
 
 	regmap_write(data->regmap, REG_SYS_IPRST0 + offset, reg);
 
 	ma35d1_reg_lock();
+
 	return 0;
 }
 
 static int ma35d1_reset_assert(struct reset_controller_dev *rcdev,
-			      unsigned long id)
+			       unsigned long id)
 {
 	return ma35d1_reset_update(rcdev, id, true);
 }
 
 static int ma35d1_reset_deassert(struct reset_controller_dev *rcdev,
-				unsigned long id)
+				 unsigned long id)
 {
 	return ma35d1_reset_update(rcdev, id, false);
 }
 
 static int ma35d1_reset_status(struct reset_controller_dev *rcdev,
-			      unsigned long id)
+			       unsigned long id)
 {
 	struct ma35d1_reset_data *data = container_of(rcdev, struct ma35d1_reset_data, rcdev);
-	int reg;
-	int offset = id / RST_PRE_REG;
+	unsigned int reg;
+	int offset = (id / RST_PRE_REG) * 4;
 
 	regmap_read(data->regmap, REG_SYS_IPRST0 + offset, &reg);
 
 	return !!(reg & BIT(id % RST_PRE_REG));
-
 }
 
 static const struct reset_control_ops ma35d1_reset_ops = {
