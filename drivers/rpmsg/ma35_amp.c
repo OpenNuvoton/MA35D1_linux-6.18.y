@@ -1,15 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- *  linux/drivers/rpmsg/ma35_amp.c
- *
  *  MA35 series AMP-A driver
  *
  *  Copyright (C) 2025 Nuvoton Technology Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #include <linux/clk.h>
@@ -54,6 +47,7 @@ struct bdtask {
 	struct list_head list;
 	struct rpmsg_endpoint *ept;
 };
+
 static LIST_HEAD(bdtask_queue);
 
 struct ma35_rpmsg_priv {
@@ -75,9 +69,11 @@ struct ma35_rpmsg_priv {
 
 	// general
 	int ready; // check remote driver is ready, aka first frame
+	/* protects the ept <-> desc bindings */
 	spinlock_t lock;
 	struct task_struct *bdthread;
 	wait_queue_head_t bd_event;
+	/* protects the binding task queue */
 	spinlock_t bd_lock;
 	struct delayed_work dwork;
 	u32 resumeflow;
@@ -91,11 +87,11 @@ struct ma35_rpmsg_priv {
 	u32 desc_txbuf;
 
 	// shmem
-	unsigned char __iomem *shmem_base;
-	unsigned char __iomem *desc_vring0; // 0 is rx for this endpoint
-	unsigned char __iomem *desc_vring1; // 1 is tx for this endpoint
-	unsigned char __iomem *shmem_rx_base;
-	unsigned char __iomem *shmem_tx_base;
+	unsigned char *shmem_base;
+	unsigned char *desc_vring0; // 0 is rx for this endpoint
+	unsigned char *desc_vring1; // 1 is tx for this endpoint
+	unsigned char *shmem_rx_base;
+	unsigned char *shmem_tx_base;
 	u32 shmem_size; // local provided
 	u32 shmem_rx_size;
 	u32 shmem_tx_size;
@@ -103,7 +99,7 @@ struct ma35_rpmsg_priv {
 	u32 vring1_offset;
 
 	// tx
-	uint8_t *buf_flag; // manage tx buffer usage
+	u8 *buf_flag; // manage tx buffer usage
 	// rx
 	void   **kick_ept; // save pointer to each rx ept by id
 
@@ -118,14 +114,15 @@ struct ma35_rpmsg_ept_priv {
 	// tx
 	unsigned int no_desc;
 	unsigned int id; // desc id of the following
-	void *pDesc; // pointer to tx desc link
+	void *tx_desc; // pointer to tx desc link
 	int remote_binded; // can be used to check remote is binded, send before check
 	// rx
-	void *bind_desc; // pointer to rx desc, can be used to check remote is created, scan until bind
+	/* pointer to rx desc, can be used to check remote is created, scan until bind */
+	void *bind_desc;
 	unsigned int bind_id; // index of kickept
 	int /*atomic_t*/ kicked;
 	wait_queue_head_t rx_event;
-	uint8_t cmd; // save CMD
+	u8 cmd; // save CMD
 	void *rxns; // save rxns for passing
 	struct task_struct *csthread;
 	wait_queue_head_t cs_event;
@@ -147,12 +144,45 @@ struct ma35_rpmsg_endpoint {
 #define to_ma35_rpmsg_endpoint(r)   container_of(r, struct ma35_rpmsg_endpoint, ept)
 #define to_ma35_rpmsg_priv(r)       container_of(r, struct ma35_rpmsg_priv, dev)
 
-#define rsc_table_rxdesc(priv, index)   ((struct rsc_table_desc *)(priv->desc_vring0 + priv->desc_size * index))
-#define rsc_table_rxns(priv, index)     ((char *)(priv->desc_vring0 + priv->ns_offset + priv->desc_size * index))
-#define rsc_table_txdesc(priv, index)   ((struct rsc_table_desc *)(priv->desc_vring1 + priv->desc_size * index))
-#define rsc_table_txns(priv, index)     ((char *)(priv->desc_vring1 + priv->ns_offset + priv->desc_size * index))
-#define shmem_rx_buf(priv, index)       ((unsigned char *)(priv->shmem_rx_base + priv->desc_rxbuf * index))
-#define shmem_tx_buf(priv, index)       ((unsigned char *)(priv->shmem_tx_base + priv->desc_txbuf * index))
+static inline struct rsc_table_desc *rsc_table_rxdesc(struct ma35_rpmsg_priv *priv, u32 index)
+{
+	return (struct rsc_table_desc *)(priv->desc_vring0 + priv->desc_size * index);
+}
+
+static inline char *rsc_table_rxns(struct ma35_rpmsg_priv *priv, u32 index)
+{
+	return (char *)(priv->desc_vring0 + priv->ns_offset + priv->desc_size * index);
+}
+
+static inline struct rsc_table_desc *rsc_table_txdesc(struct ma35_rpmsg_priv *priv, u32 index)
+{
+	return (struct rsc_table_desc *)(priv->desc_vring1 + priv->desc_size * index);
+}
+
+static inline char *rsc_table_txns(struct ma35_rpmsg_priv *priv, u32 index)
+{
+	return (char *)(priv->desc_vring1 + priv->ns_offset + priv->desc_size * index);
+}
+
+static inline unsigned char *shmem_rx_buf(struct ma35_rpmsg_priv *priv, u32 index)
+{
+	return priv->shmem_rx_base + priv->desc_rxbuf * index;
+}
+
+static inline unsigned char *shmem_tx_buf(struct ma35_rpmsg_priv *priv, u32 index)
+{
+	return priv->shmem_tx_base + priv->desc_txbuf * index;
+}
+
+/* next desc of a chain, NULL at the end */
+static inline struct rsc_table_desc *rsc_table_next(struct ma35_rpmsg_priv *priv,
+						    struct rsc_table_desc *desc)
+{
+	if (!desc->nxt_offset)
+		return NULL;
+
+	return (struct rsc_table_desc *)(priv->shmem_base + desc->nxt_offset);
+}
 
 #define VRING_DESC_CMD_HEAD    0x1 // write
 #define VRING_DESC_CMD_RELOAD  0x2
@@ -220,23 +250,21 @@ static irqreturn_t ma35_rpmsg_ipi_isr(int irq, void *data)
 	}
 
 	// scan desc ch by ch
-	for (i = 0; i < rpmsg_priv->desc_num; i++)
-	{
-		if(rsc_table_rxdesc(rpmsg_priv, i)->CMD & (VRING_DESC_CMD_HEAD | VRING_DESC_CMD_CLOSE))
-		{
+	for (i = 0; i < rpmsg_priv->desc_num; i++) {
+		if (rsc_table_rxdesc(rpmsg_priv, i)->CMD &
+		    (VRING_DESC_CMD_HEAD | VRING_DESC_CMD_CLOSE)) {
 			ept_priv = (struct ma35_rpmsg_ept_priv *)rpmsg_priv->kick_ept[i];
-			if(!check_rx_bind_ready(ept_priv))
-			{
+			if (!check_rx_bind_ready(ept_priv)) {
 				desc = ept_priv->bind_desc;
 				ept_priv->cmd = desc->CMD;
 				desc->CMD = 0;
 				desc->STS = VRING_DESC_STS_READING;
-				if(ept_priv->cmd & VRING_DESC_CMD_HEAD) {
+				if (ept_priv->cmd & VRING_DESC_CMD_HEAD) {
 					// enqueue to skb
-					if(ma35_rpmsg_receive(ept_priv->ept_parent, NULL, &len))
+					if (ma35_rpmsg_receive(ept_priv->ept_parent, NULL, &len))
 						continue;
 
-				} else if(ept_priv->cmd & VRING_DESC_CMD_CLOSE) {
+				} else if (ept_priv->cmd & VRING_DESC_CMD_CLOSE) {
 					ma35_rpmsg_reconnect_ept(ept_priv->ept_parent);
 				}
 				// trigger ept
@@ -265,25 +293,21 @@ static int ma35_rpmsg_ns_bind_remote(struct rpmsg_endpoint *ept, char *ns, bool 
 	// poll for desc to search ns
 	struct ma35_rpmsg_endpoint *ma35_rpept = to_ma35_rpmsg_endpoint(ept);
 	struct ma35_rpmsg_priv *rpmsg_priv = ma35_rpept->rpmsg_priv;
-	struct ma35_rpmsg_ept_priv *ept_priv = ept->priv;
-	struct rpmsg_device *rpdev;
+	struct ma35_rpmsg_ept_priv *ept_priv;
 	struct rsc_table_desc *rxdesc;
 	unsigned long flags;
 	int i, ret = 0;
 
-	if(!ept || !ns)
+	if (!ept || !ns)
 		return -1;
 
 	ept_priv = ept->priv;
-	rpdev = ept->rpdev;
 
 NS_MATCHING:
-	for(i = 0; i < rpmsg_priv->desc_num; i++)
-	{
-		if((rsc_table_rxdesc(rpmsg_priv, i)->CMD & VRING_DESC_CMD_CLAIM) == 0)
+	for (i = 0; i < rpmsg_priv->desc_num; i++) {
+		if ((rsc_table_rxdesc(rpmsg_priv, i)->CMD & VRING_DESC_CMD_CLAIM) == 0)
 			continue;
-		if(!memcmp(ns, rsc_table_rxns(rpmsg_priv, i), rpmsg_priv->ns_size))
-		{
+		if (!memcmp(ns, rsc_table_rxns(rpmsg_priv, i), rpmsg_priv->ns_size)) {
 			spin_lock_irqsave(&rpmsg_priv->lock, flags);
 
 			ept_priv->bind_desc = rsc_table_rxdesc(rpmsg_priv, i);
@@ -292,16 +316,16 @@ NS_MATCHING:
 
 			rxdesc = ept_priv->bind_desc;
 			rxdesc->STS = VRING_DESC_STS_BIND;
-			while(rxdesc)
-			{
+			while (rxdesc) {
 				ret += rpmsg_priv->desc_rxbuf;
-				rxdesc = (rxdesc->nxt_offset == 0) ? NULL : (struct rsc_table_desc *)(rpmsg_priv->shmem_base + rxdesc->nxt_offset);
+				rxdesc = rsc_table_next(rpmsg_priv, rxdesc);
 			}
 
 			spin_unlock_irqrestore(&rpmsg_priv->lock, flags);
 
 			// bind success, print something
-			dev_info(ma35_rpept->eptdev, "Binded with remote ept \"%s\" with size %d.\n", ns, ret);
+			dev_info(ma35_rpept->eptdev, "Binded with remote ept \"%s\" with size %d.\n",
+				 ns, ret);
 
 			return ret;
 		}
@@ -317,15 +341,14 @@ static int check_tx_bind_ready(struct ma35_rpmsg_ept_priv *ept_priv)
 {
 	struct rsc_table_desc *desc;
 
-	if(!ept_priv->remote_binded)
+	if (!ept_priv->remote_binded)
 		return -EACCES;
 
-	desc = ept_priv->pDesc;
+	desc = ept_priv->tx_desc;
 
-	if(desc->STS & (VRING_DESC_STS_READING | VRING_DESC_STS_ERR))
+	if (desc->STS & (VRING_DESC_STS_READING | VRING_DESC_STS_ERR)) {
 		return -EAGAIN;
-	else if(desc->STS == VRING_DESC_STS_CLOSE)
-	{
+	} else if (desc->STS == VRING_DESC_STS_CLOSE) {
 		ma35_rpmsg_reconnect_ept(ept_priv->ept_parent);
 
 		return -EPERM;
@@ -336,10 +359,10 @@ static int check_tx_bind_ready(struct ma35_rpmsg_ept_priv *ept_priv)
 
 static int check_rx_bind_ready(struct ma35_rpmsg_ept_priv *ept_priv)
 {
-	if(!ept_priv)
+	if (!ept_priv)
 		return -1;
 
-	if(!ept_priv->bind_desc)
+	if (!ept_priv->bind_desc)
 		return -1;
 
 	return 0;
@@ -353,7 +376,7 @@ static int ma35_kill_ns_bind(struct rpmsg_endpoint *ept)
 	struct rsc_table_desc *rxdesc;
 
 	ept_priv = ept->priv;
-	if(check_rx_bind_ready(ept_priv) < 0)
+	if (check_rx_bind_ready(ept_priv) < 0)
 		return -1;
 
 	rxdesc = ept_priv->bind_desc;
@@ -378,40 +401,37 @@ static int ma35_check_available_desc(struct rpmsg_endpoint *ept, int len)
 
 	spin_lock_irqsave(&rpmsg_priv->lock, flags);
 
-	for (i = 0, avail = 0; i < rpmsg_priv->desc_num; i++)
-	{
-		if(!rpmsg_priv->buf_flag[i])
+	for (i = 0, avail = 0; i < rpmsg_priv->desc_num; i++) {
+		if (!rpmsg_priv->buf_flag[i])
 			avail++;
 	}
 
 	req = len / rpmsg_priv->desc_txbuf;
-	if((len % rpmsg_priv->desc_txbuf) != 0)
+	if ((len % rpmsg_priv->desc_txbuf) != 0)
 		req++;
 
-	if(req > avail || len == 0)
+	if (req > avail || len == 0)
 		goto err; /* buffer insufficient */
 
 	ept_priv->no_desc = req;
 	ept_priv->available_len = len;
 
 	id = -1;
-	for (i = 0; (i < rpmsg_priv->desc_num) && (req > 0); i++)
-	{
-		if(!rpmsg_priv->buf_flag[i])
-		{
+	for (i = 0; (i < rpmsg_priv->desc_num) && (req > 0); i++) {
+		if (!rpmsg_priv->buf_flag[i]) {
 			rpmsg_priv->buf_flag[i] = 1;
 			desc->nxt_offset = rpmsg_priv->vring1_offset + rpmsg_priv->desc_size * i;
 			desc = (struct rsc_table_desc *)(rpmsg_priv->shmem_base + desc->nxt_offset);
 			req--;
-			if(id < 0)
+			if (id < 0)
 				id = i;
 		}
 	}
-	if(id < 0)
+	if (id < 0)
 		goto err;
 
 	ept_priv->id = id;
-	ept_priv->pDesc = (void *)(rpmsg_priv->shmem_base + head.nxt_offset);
+	ept_priv->tx_desc = (void *)(rpmsg_priv->shmem_base + head.nxt_offset);
 
 	spin_unlock_irqrestore(&rpmsg_priv->lock, flags);
 
@@ -437,10 +457,11 @@ static int ma35_request_tx_desc(struct rpmsg_endpoint *ept, struct rpmsg_channel
 		return -1;
 
 	// desc get, waiting to be binded by remote
-	desc = ept_priv->pDesc;
+	desc = ept_priv->tx_desc;
 	desc->CMD = VRING_DESC_CMD_CLAIM;
 	desc->STS = 0;
-	strncpy((char *)desc + rpmsg_priv->ns_offset, chinfo.name, rpmsg_priv->ns_size);
+	memcpy_and_pad((char *)desc + rpmsg_priv->ns_offset, rpmsg_priv->ns_size, chinfo.name,
+		       strnlen(chinfo.name, rpmsg_priv->ns_size), 0);
 
 	return ret;
 }
@@ -450,21 +471,24 @@ static int ma35_rpmsg_release_shmem(struct rpmsg_endpoint *ept)
 	u32 i, offset;
 	struct ma35_rpmsg_endpoint *ma35_rpept = to_ma35_rpmsg_endpoint(ept);
 	struct ma35_rpmsg_priv *rpmsg_priv = ma35_rpept->rpmsg_priv;
-	struct ma35_rpmsg_ept_priv *ept_priv = ept->priv;
+	struct ma35_rpmsg_ept_priv *ept_priv;
 	struct rsc_table_desc *desc, *next;
 	unsigned long flags;
 
-	if(!ept || !ept_priv)
+	if (!ept)
 		return -1;
 
-	desc = ept_priv->pDesc;
+	ept_priv = ept->priv;
+	if (!ept_priv)
+		return -1;
+
+	desc = ept_priv->tx_desc;
 
 	spin_lock_irqsave(&ept_priv->lock, flags);
 
-	while(desc)
-	{
+	while (desc) {
 		next = (struct rsc_table_desc *)(rpmsg_priv->shmem_base + desc->nxt_offset);
-		i = desc->buf_offset/rpmsg_priv->desc_txbuf;
+		i = desc->buf_offset / rpmsg_priv->desc_txbuf;
 		rpmsg_priv->buf_flag[i] = 0;
 		offset = desc->nxt_offset;
 		// resume
@@ -486,26 +510,26 @@ static int ma35_rpmsg_bind_process(void *data)
 	struct rsc_table_desc *desc;
 	int buf_size;
 
-	if(!ept)
+	if (!ept)
 		return 0;
 
 	ept_priv = ept->priv;
 
-	if(ept_priv->ept_type == EPT_TYPE_TX) {
+	if (ept_priv->ept_type == EPT_TYPE_TX) {
 		// just check STS
-		desc = ept_priv->pDesc;
-		if(desc->STS & VRING_DESC_STS_BIND) {
+		desc = ept_priv->tx_desc;
+		if (desc->STS & VRING_DESC_STS_BIND) {
 			ept_priv->remote_binded = 1;
 			ept_priv->task = NULL;
-			dev_info(ma35_rpept->eptdev, "Remote binded to \"%s\".\n", (char *)desc + sizeof(struct rsc_table_desc));
+			dev_info(ma35_rpept->eptdev, "Remote binded to \"%s\".\n",
+				 (char *)desc + sizeof(struct rsc_table_desc));
 			//break;
 			return 1;
 		}
-	}
-	else { // EPT_TYPE_RX
+	} else { // EPT_TYPE_RX
 		// scan for rxns
 		buf_size = ma35_rpmsg_ns_bind_remote(ept, ept_priv->rxns, false);
-		if(buf_size > 0) {
+		if (buf_size > 0) {
 			ept_priv->available_len = (unsigned int)buf_size;
 			ept_priv->task = NULL;
 
@@ -516,15 +540,15 @@ static int ma35_rpmsg_bind_process(void *data)
 	return 0;
 }
 
-static struct bdtask *ma35_enqueue_bdtask(struct rpmsg_endpoint *ept) {
+static struct bdtask *ma35_enqueue_bdtask(struct rpmsg_endpoint *ept)
+{
 	struct bdtask *task;
 	struct ma35_rpmsg_endpoint *ma35_rpept = to_ma35_rpmsg_endpoint(ept);
 	struct ma35_rpmsg_priv *rpmsg_priv = ma35_rpept->rpmsg_priv;
 
-	task = kmalloc(sizeof(struct bdtask), GFP_KERNEL);
-	if (!task) {
+	task = kmalloc(sizeof(*task), GFP_KERNEL);
+	if (!task)
 		return NULL;
-	}
 
 	task->ept = ept;
 	INIT_LIST_HEAD(&task->list);
@@ -535,18 +559,20 @@ static struct bdtask *ma35_enqueue_bdtask(struct rpmsg_endpoint *ept) {
 	return task;
 }
 
-static int ma35_binding_thread(void *data) {
+static int ma35_binding_thread(void *data)
+{
 	struct bdtask *task, *tmp;
 	struct ma35_rpmsg_priv *rpmsg_priv = data;
 	unsigned long flags;
 
 	while (!kthread_should_stop()) {
 		if (list_empty(&bdtask_queue)) {
-			wait_event_interruptible(rpmsg_priv->bd_event, !list_empty(&bdtask_queue) || kthread_should_stop());
-			if(kthread_should_stop())
+			wait_event_interruptible(rpmsg_priv->bd_event,
+						 !list_empty(&bdtask_queue) ||
+						 kthread_should_stop());
+			if (kthread_should_stop())
 				break;
-		}
-		else {
+		} else {
 			spin_lock_irqsave(&rpmsg_priv->bd_lock, flags);
 			list_for_each_entry_safe(task, tmp, &bdtask_queue, list) {
 				if (ma35_rpmsg_bind_process(task->ept)) {
@@ -555,14 +581,15 @@ static int ma35_binding_thread(void *data) {
 				}
 			}
 			spin_unlock_irqrestore(&rpmsg_priv->bd_lock, flags);
-			yield();
+			cond_resched();
 		}
 	}
 
 	return 0;
 }
 
-static int ma35_checksts_thread(void *data) {
+static int ma35_checksts_thread(void *data)
+{
 	struct rpmsg_endpoint *ept = (struct rpmsg_endpoint *)data;
 	struct ma35_rpmsg_endpoint *ma35_rpept = to_ma35_rpmsg_endpoint(ept);
 	struct ma35_rpmsg_ept_priv *ept_priv = ept->priv;
@@ -570,14 +597,15 @@ static int ma35_checksts_thread(void *data) {
 	while (!kthread_should_stop()) {
 		if (ma35_rpmsg_retrieve_status(ept) != VRING_DESC_STS_ERR) {
 			wait_event_interruptible(ept_priv->cs_event,
-				(ma35_rpmsg_retrieve_status(ept) == VRING_DESC_STS_ERR) || kthread_should_stop());
-			if(kthread_should_stop())
+						 ma35_rpmsg_retrieve_status(ept) ==
+							VRING_DESC_STS_ERR ||
+						 kthread_should_stop());
+			if (kthread_should_stop())
 				break;
-		}
-		else {
-			if(skb_queue_empty(&ma35_rpept->rxqueue))
+		} else {
+			if (skb_queue_empty(&ma35_rpept->rxqueue))
 				ma35_rpmsg_receive_status(ept, VRING_DESC_STS_ACK);
-			yield();
+			cond_resched();
 		}
 	}
 
@@ -589,19 +617,16 @@ static int ma35_rpmsg_reconnect_ept(struct rpmsg_endpoint *ept)
 	struct ma35_rpmsg_ept_priv *ept_priv = ept->priv;
 	struct rsc_table_desc *desc;
 
-	if(ept_priv->task)
+	if (ept_priv->task)
 		return -1;
 
-	if(ept_priv->ept_type == EPT_TYPE_TX)
-	{
+	if (ept_priv->ept_type == EPT_TYPE_TX) {
 		// shared memory not released
 		ept_priv->remote_binded = 0;
-		desc = ept_priv->pDesc;
+		desc = ept_priv->tx_desc;
 		desc->STS = 0;
 		desc->CMD = VRING_DESC_CMD_CLAIM;
-	}
-	else // EPT_TYPE_RX
-	{
+	} else { // EPT_TYPE_RX
 		ma35_kill_ns_bind(ept);
 	}
 
@@ -610,7 +635,8 @@ static int ma35_rpmsg_reconnect_ept(struct rpmsg_endpoint *ept)
 	return 0;
 }
 
-static struct rpmsg_endpoint *ma35_rpmsg_create_ept(struct rpmsg_device *rpdev, rpmsg_rx_cb_t cb, void *priv, struct rpmsg_channel_info chinfo)
+static struct rpmsg_endpoint *ma35_rpmsg_create_ept(struct rpmsg_device *rpdev, rpmsg_rx_cb_t cb,
+						    void *priv, struct rpmsg_channel_info chinfo)
 {
 	struct ma35_rpmsg_device *ma35_rpdev = to_ma35_rpmsg_device(rpdev);
 	struct ma35_rpmsg_priv *rpmsg_priv;
@@ -641,16 +667,20 @@ static struct rpmsg_endpoint *ma35_rpmsg_create_ept(struct rpmsg_device *rpdev, 
 	ept_priv->ept_parent = ept;
 	spin_lock_init(&ept_priv->lock);
 
-	if(chinfo.src == EPT_TYPE_TX) {
+	if (chinfo.src == EPT_TYPE_TX) {
 		// check for available shmem
 		ept_priv->ept_type = EPT_TYPE_TX;
 		if (ma35_request_tx_desc(ept, chinfo) < 0)
 			goto free_ept_priv;
-	} else if(chinfo.src == EPT_TYPE_RX) {
+	} else if (chinfo.src == EPT_TYPE_RX) {
 		// check ns from remote
 		ept_priv->ept_type = EPT_TYPE_RX;
-		ept_priv->rxns = kzalloc(sizeof(char) * RPMSG_NAME_SIZE, GFP_KERNEL);
-		strncpy(ept_priv->rxns, chinfo.name, rpmsg_priv->ns_size);
+		ept_priv->rxns = kzalloc(RPMSG_NAME_SIZE, GFP_KERNEL);
+		if (!ept_priv->rxns)
+			goto free_ept_priv;
+
+		memcpy_and_pad(ept_priv->rxns, rpmsg_priv->ns_size, chinfo.name,
+			       strnlen(chinfo.name, rpmsg_priv->ns_size), 0);
 		init_waitqueue_head(&ept_priv->rx_event); // place here to prevent poll fail
 		init_waitqueue_head(&ept_priv->cs_event);
 		ept_priv->csthread = kthread_run(ma35_checksts_thread, ept, chinfo.name);
@@ -664,16 +694,17 @@ static struct rpmsg_endpoint *ma35_rpmsg_create_ept(struct rpmsg_device *rpdev, 
 	ept->ops = &ma35_rpmsg_endpoint_ops;
 
 	/* Create one if no thread */
-	if(!rpmsg_priv->bdthread) {
+	if (!rpmsg_priv->bdthread) {
 		init_waitqueue_head(&rpmsg_priv->bd_event);
-		rpmsg_priv->bdthread = kthread_run(ma35_binding_thread, rpmsg_priv, "binding_thread");
+		rpmsg_priv->bdthread = kthread_run(ma35_binding_thread, rpmsg_priv,
+						   "binding_thread");
 		dev_dbg(&rpmsg_priv->dev, "Binding thread is created.\n");
-		if(!rpmsg_priv->bdthread)
+		if (!rpmsg_priv->bdthread)
 			goto free_ept_priv;
 	}
 
 	ept_priv->task = ma35_enqueue_bdtask(ept);
-	if(!ept_priv->task)
+	if (!ept_priv->task)
 		goto free_ept_priv;
 
 	return ept;
@@ -691,8 +722,7 @@ static void ma35_rpmsg_ept_release(struct kref *kref)
 	struct rpmsg_endpoint *ept = container_of(kref, struct rpmsg_endpoint, refcount);
 	struct ma35_rpmsg_ept_priv *ept_priv = ept->priv;
 
-	if(ept_priv)
-		kfree(ept_priv);
+	kfree(ept_priv);
 
 	kfree(to_ma35_rpmsg_endpoint(ept));
 }
@@ -706,36 +736,37 @@ static void ma35_rpmsg_destroy_ept(struct rpmsg_endpoint *ept)
 	unsigned long flags;
 
 	// tell remote ept close
-	if(ept_priv->ept_type == EPT_TYPE_TX) {
-		if(ept_priv->remote_binded) {
+	if (ept_priv->ept_type == EPT_TYPE_TX) {
+		if (ept_priv->remote_binded) {
 			ept_priv->remote_binded = 0;
-			desc = ept_priv->pDesc;
+			desc = ept_priv->tx_desc;
 			desc->CMD = VRING_DESC_CMD_CLOSE;
 			ma35_rpmsg_notify_remote(rpmsg_priv);
 		}
 		// no need to wait, just leave the CMD
 		ma35_rpmsg_release_shmem(ept);
 	} else { // EPT_TYPE_RX
-		if(ept_priv->bind_desc) {
+		if (ept_priv->bind_desc) {
 			desc = ept_priv->bind_desc;
-			if(desc) // NULL: no bind or already get close cmd
+			if (desc) // NULL: no bind or already get close cmd
 				desc->STS = VRING_DESC_STS_CLOSE;
 		}
-		if(ept_priv->csthread) {
+		if (ept_priv->csthread) {
 			kthread_stop(ept_priv->csthread);
 			wake_up_interruptible(&ept_priv->cs_event);
 		}
 		// trace back to unregister ept from device
 		disable_irq(rpmsg_priv->irq_num);
 		synchronize_irq(rpmsg_priv->irq_num);
-		ept_priv->pDesc = ept_priv->bind_desc = NULL;
+		ept_priv->tx_desc = NULL;
+		ept_priv->bind_desc = NULL;
 		rpmsg_priv->kick_ept[ept_priv->bind_id] = NULL;
 		enable_irq(rpmsg_priv->irq_num);
 		kfree(ept_priv->rxns);
 	}
 
 	// kill binding task
-	if(ept_priv->task) {
+	if (ept_priv->task) {
 		spin_lock_irqsave(&rpmsg_priv->bd_lock, flags);
 		list_del(&ept_priv->task->list);
 		spin_unlock_irqrestore(&rpmsg_priv->bd_lock, flags);
@@ -753,13 +784,14 @@ static int ma35_rpmsg_desc_reset(struct rpmsg_endpoint *ept)
 	struct ma35_rpmsg_endpoint *ma35_rpept = to_ma35_rpmsg_endpoint(ept);
 	struct ma35_rpmsg_priv *rpmsg_priv;
 
-	desc = ept_priv->pDesc;
+	desc = ept_priv->tx_desc;
 	rpmsg_priv = ma35_rpept->rpmsg_priv;
 
-	while(desc)
-	{
-		desc->CMD = desc->STS = desc->len = 0;
-		desc = (desc->nxt_offset == 0) ? NULL : (struct rsc_table_desc *)(rpmsg_priv->shmem_base + desc->nxt_offset);
+	while (desc) {
+		desc->CMD = 0;
+		desc->STS = 0;
+		desc->len = 0;
+		desc = rsc_table_next(rpmsg_priv, desc);
 	}
 
 	return 0;
@@ -774,46 +806,44 @@ static int ma35_rpmsg_send(struct rpmsg_endpoint *ept, void *data, int len)
 	unsigned long flags;
 	int i, res;
 
-	if(!ept || !ept->priv || !data || len < 0)
+	if (!ept || !ept->priv || !data || len < 0)
 		return -EINVAL; // RPMSG_ERR_PARAM
 
 	ept_priv = ept->priv;
-	if(len > ept_priv->available_len)
+	if (len > ept_priv->available_len)
 		return -ENOMEM; // RPMSG_ERR_NO_MEM
 
-	if(ept_priv->ept_type != EPT_TYPE_TX)
+	if (ept_priv->ept_type != EPT_TYPE_TX)
 		return -EACCES;
 
-	desc = ept_priv->pDesc;
-	if(!desc)
+	desc = ept_priv->tx_desc;
+	if (!desc)
 		return -EBUSY; // RPMSG_ERR_NO_BUFF
 
 	res = check_tx_bind_ready(ept_priv);
-	if(res)
+	if (res)
 		return res;
 
 	spin_lock_irqsave(&ept_priv->lock, flags);
 
 	ma35_rpmsg_desc_reset(ept);
-	desc->STS = VRING_DESC_CMD_HEAD; // mark writting
+	desc->STS = VRING_DESC_CMD_HEAD; // mark writing
 
 	rpmsg_priv = ma35_rpept->rpmsg_priv;
 
-	for (i = 0, res = len; i < len; i += rpmsg_priv->desc_txbuf, res -= rpmsg_priv->desc_txbuf)
-	{
-		if(res <= rpmsg_priv->desc_txbuf)
-		{
-			memcpy((void *)(rpmsg_priv->shmem_tx_base + desc->buf_offset), (void *)((u8 *)data + i), res);
+	for (i = 0, res = len; i < len;
+	     i += rpmsg_priv->desc_txbuf, res -= rpmsg_priv->desc_txbuf) {
+		if (res <= rpmsg_priv->desc_txbuf) {
+			memcpy(rpmsg_priv->shmem_tx_base + desc->buf_offset, (u8 *)data + i, res);
 			desc->len = res;
-		}
-		else
-		{
-			memcpy((void *)(rpmsg_priv->shmem_tx_base + desc->buf_offset), (void *)((u8 *)data + i), rpmsg_priv->desc_txbuf);
+		} else {
+			memcpy(rpmsg_priv->shmem_tx_base + desc->buf_offset, (u8 *)data + i,
+			       rpmsg_priv->desc_txbuf);
 			desc->len = rpmsg_priv->desc_txbuf;
 			desc = (struct rsc_table_desc *)(rpmsg_priv->shmem_base + desc->nxt_offset);
 		}
 	}
-	((struct rsc_table_desc *)ept_priv->pDesc)->CMD = VRING_DESC_CMD_HEAD;
+	((struct rsc_table_desc *)ept_priv->tx_desc)->CMD = VRING_DESC_CMD_HEAD;
 
 	ma35_rpmsg_notify_remote(rpmsg_priv);
 
@@ -842,17 +872,17 @@ static u8 ma35_rpmsg_retrieve_status(struct rpmsg_endpoint *ept)
 	struct ma35_rpmsg_ept_priv *ept_priv;
 	struct rsc_table_desc *desc;
 
-	if(!ept)
+	if (!ept)
 		return -1;
 
 	ept_priv = ept->priv;
 
-	if(!ept_priv)
+	if (!ept_priv)
 		return -1;
 
 	desc = ept_priv->bind_desc;
 
-	if(!desc)
+	if (!desc)
 		return -1;
 
 	return desc->STS;
@@ -860,20 +890,21 @@ static u8 ma35_rpmsg_retrieve_status(struct rpmsg_endpoint *ept)
 
 static int ma35_rpmsg_receive_status(struct rpmsg_endpoint *ept, u8 sts)
 {
-	struct ma35_rpmsg_ept_priv *ept_priv = ept->priv;
+	struct ma35_rpmsg_ept_priv *ept_priv;
 	struct ma35_rpmsg_endpoint *ma35_rpept = to_ma35_rpmsg_endpoint(ept);
 	struct rsc_table_desc *desc;
 
-	if(!ept)
+	if (!ept)
 		return -1;
 
+	ept_priv = ept->priv;
 	desc = ept_priv->bind_desc;
 	desc->STS = sts;
 
-	if(sts == VRING_DESC_STS_ACK) {
+	if (sts == VRING_DESC_STS_ACK) {
 		/* Userspace has consumed the data; clear our pending-burst marker */
 		skb_queue_purge(&ma35_rpept->rxqueue);
-	} else if(sts == VRING_DESC_STS_ERR) {
+	} else if (sts == VRING_DESC_STS_ERR) {
 		// If err, trigger check thread
 		wake_up_interruptible(&ept_priv->cs_event);
 	}
@@ -890,22 +921,22 @@ static int ma35_rpmsg_receive(struct rpmsg_endpoint *ept, void *buf, int *len)
 	int rxlen;
 
 	// flow control on skb queue
-	if(!skb_queue_empty(&ma35_rpept->rxqueue)) {
+	if (!skb_queue_empty(&ma35_rpept->rxqueue)) {
 		ma35_rpmsg_receive_status(ept, VRING_DESC_STS_ERR);
 		return -ENOMEM;
 	}
 
 	desc = (struct rsc_table_desc *)ept_priv->bind_desc;
 	rxlen = 0;
-	while(desc && desc->len)
-	{
+	while (desc && desc->len) {
 		// enqueue via ept, appl read this recursively
-		if(ept->cb(ept->rpdev, (void *)(rpmsg_priv->shmem_rx_base + desc->buf_offset), desc->len, ma35_rpept->eptdev, 0)) {
+		if (ept->cb(ept->rpdev, rpmsg_priv->shmem_rx_base + desc->buf_offset, desc->len,
+			    ma35_rpept->eptdev, 0)) {
 			ma35_rpmsg_receive_status(ept, VRING_DESC_STS_ERR);
 			return -ENOMEM;
 		}
 		rxlen += desc->len;
-		desc = (desc->nxt_offset == 0) ? NULL : (struct rsc_table_desc *)(rpmsg_priv->shmem_base + desc->nxt_offset);
+		desc = rsc_table_next(rpmsg_priv, desc);
 	}
 	*len = rxlen;
 
@@ -918,6 +949,7 @@ static int ma35_rpmsg_receive(struct rpmsg_endpoint *ept, void *buf, int *len)
 	 */
 	if (rxlen > 0) {
 		struct sk_buff *skb = alloc_skb(0, GFP_ATOMIC);
+
 		if (skb)
 			skb_queue_tail(&ma35_rpept->rxqueue, skb);
 	}
@@ -933,21 +965,19 @@ static __poll_t ma35_rpmsg_poll(struct rpmsg_endpoint *ept, struct file *filp, p
 	__poll_t mask = 0;
 	unsigned long flags;
 
-	if(!ept)
-		return -1;
+	if (!ept)
+		return EPOLLERR;
 
 	ept_priv = ept->priv;
 
 	poll_wait(filp, &ept_priv->rx_event, wait);
 
 	spin_lock_irqsave(&ept_priv->lock, flags);
-	if(ept_priv->kicked)
-	{
-		if(ept_priv->cmd & VRING_DESC_CMD_HEAD)	{
+	if (ept_priv->kicked) {
+		if (ept_priv->cmd & VRING_DESC_CMD_HEAD)
 			mask |= EPOLLIN;
-		} else if(ept_priv->cmd & VRING_DESC_CMD_CLOSE) {
+		else if (ept_priv->cmd & VRING_DESC_CMD_CLOSE)
 			mask |= EPOLLHUP; // remote shut down
-		}
 
 		ept_priv->kicked = 0; // interrupt is okay
 	}
@@ -990,9 +1020,9 @@ static int ma35_desc_init(struct ma35_rpmsg_priv *priv)
 	u32 i;
 
 	memset(desc, 0, priv->desc_num * priv->desc_size);
-	for (i = 0; i < priv->desc_num; i++)
-	{
-		((struct rsc_table_desc *)(desc + i * priv->desc_size))->buf_offset = i * priv->desc_txbuf;
+	for (i = 0; i < priv->desc_num; i++) {
+		((struct rsc_table_desc *)(desc + i * priv->desc_size))->buf_offset =
+			i * priv->desc_txbuf;
 	}
 
 	return 0;
@@ -1011,24 +1041,24 @@ static int ma35_rsc_table_parser(struct ma35_rpmsg_priv *priv, struct device_nod
 	struct fw_rsc_vdev *rsc_vdev;
 	struct fw_rsc_vdev_vring *vring0, *vring1;
 
-	if(priv->ready)
+	if (priv->ready)
 		goto resu;
 
 	rsc_table = (struct resource_table *)priv->shmem_base;
-	if(rsc_table->ver != DRIVER_VERSION || rsc_table->num != 1) {
+	if (rsc_table->ver != DRIVER_VERSION || rsc_table->num != 1) {
 		dev_err(&priv->dev, "Nuvoton AMP version not match %d\n\n", rsc_table->ver);
 		goto err;
 	}
 
 	rsc_vdev_ext = (struct fw_rsc_vdev_ext *)(priv->shmem_base + rsc_table->offset[0]);
 	rsc_vdev = &rsc_vdev_ext->vdev;
-	if(rsc_vdev->id != VIRTIO_ID_RPMSG_ || rsc_vdev->num_of_vrings != 2) {
+	if (rsc_vdev->id != VIRTIO_ID_RPMSG_ || rsc_vdev->num_of_vrings != 2) {
 		dev_err(&priv->dev, "vdev: %d %d\n", rsc_vdev->id, rsc_vdev->num_of_vrings);
 		goto err;
 	}
 	vring0 = (struct fw_rsc_vdev_vring *)(priv->shmem_base + rsc_table->offset[1]);
 	vring1 = (struct fw_rsc_vdev_vring *)(priv->shmem_base + rsc_table->offset[2]);
-	if(vring0->notifyid != 1 || vring1->notifyid != 2) {
+	if (vring0->notifyid != 1 || vring1->notifyid != 2) {
 		dev_err(&priv->dev, "notifyid: %d %d\n", vring0->notifyid, vring1->notifyid);
 		goto err;
 	}
@@ -1038,8 +1068,8 @@ static int ma35_rsc_table_parser(struct ma35_rpmsg_priv *priv, struct device_nod
 	priv->ns_size = priv->desc_size - priv->ns_offset;
 	priv->vring0_offset = rsc_table->offset[3];
 	priv->vring1_offset = rsc_table->offset[4];
-	priv->desc_vring0 = (unsigned char *)(priv->shmem_base + rsc_table->offset[3]);
-	priv->desc_vring1 = (unsigned char *)(priv->shmem_base + rsc_table->offset[4]);
+	priv->desc_vring0 = priv->shmem_base + rsc_table->offset[3];
+	priv->desc_vring1 = priv->shmem_base + rsc_table->offset[4];
 	priv->shmem_rx_base = priv->shmem_base + vring0->da;
 	priv->shmem_rx_size = vring0->pa;
 	priv->shmem_tx_base = priv->shmem_base + vring1->da;
@@ -1048,16 +1078,17 @@ static int ma35_rsc_table_parser(struct ma35_rpmsg_priv *priv, struct device_nod
 	priv->desc_txbuf = priv->shmem_tx_size / priv->desc_num;
 
 	priv->buf_flag = kzalloc(priv->desc_num, GFP_KERNEL);
-	priv->kick_ept = kzalloc(sizeof(void *) * priv->desc_num, GFP_KERNEL);
-	if(!priv->buf_flag || !priv->kick_ept)
+	priv->kick_ept = kcalloc(priv->desc_num, sizeof(void *), GFP_KERNEL);
+	if (!priv->buf_flag || !priv->kick_ept)
 		goto err;
-	if((priv->shmem_rx_size + priv->shmem_tx_size + vring0->da) > priv->shmem_size) {
-		dev_err(&priv->dev, "Insufficient shared memory, please try increasing reserved-memory.\n");
+	if ((priv->shmem_rx_size + priv->shmem_tx_size + vring0->da) > priv->shmem_size) {
+		dev_err(&priv->dev,
+			"Insufficient shared memory, please try increasing reserved-memory.\n");
 		goto err;
-	}
-	else {
+	} else {
 		dev_info(&priv->dev, "AMPv%d with Tx/Rx shmem %d/%d KiB, naming space %d letters.\n",
-			rsc_table->ver, priv->shmem_tx_size >> 10, priv->shmem_rx_size >> 10, priv->ns_size);
+			 rsc_table->ver, priv->shmem_tx_size >> 10, priv->shmem_rx_size >> 10,
+			 priv->ns_size);
 	}
 
 	spin_lock_init(&priv->lock);
@@ -1111,11 +1142,11 @@ static int ma35_ipi_register(struct ma35_rpmsg_priv *rpmsg_priv, struct device_n
 	writel_relaxed(0x2, rpmsg_priv->ipi_rxbase + IPI_REG_CMP); // fastest
 	writel_relaxed(IPI_CTL_INTEN, rpmsg_priv->ipi_rxbase + IPI_REG_CTL); // INTEN
 	writel_relaxed(readl_relaxed(rpmsg_priv->ipi_rxbase + IPI_REG_INTSTS) & IPI_INTSTS_TIF,
-					rpmsg_priv->ipi_rxbase + IPI_REG_INTSTS); // clear
+		       rpmsg_priv->ipi_rxbase + IPI_REG_INTSTS); // clear
 	/* request irq handler */
 	irq_num = of_irq_get(ipi_np, 0);
 	if (devm_request_irq(dev, irq_num, ma35_rpmsg_ipi_isr,
-			IRQF_NO_SUSPEND, dev_name(dev), rpmsg_priv)) {
+			     IRQF_NO_SUSPEND, dev_name(dev), rpmsg_priv)) {
 		pr_debug("register irq failed %d\n", irq_num);
 		ret = -EAGAIN;
 		goto out2;
@@ -1147,7 +1178,7 @@ static int ma35_ipi_register(struct ma35_rpmsg_priv *rpmsg_priv, struct device_n
 	writel_relaxed(0x2, rpmsg_priv->ipi_txbase + IPI_REG_CMP); // fastest
 	writel_relaxed(IPI_CTL_INTEN, rpmsg_priv->ipi_txbase + IPI_REG_CTL); // INTEN
 	writel_relaxed(readl_relaxed(rpmsg_priv->ipi_txbase + IPI_REG_INTSTS) & IPI_INTSTS_TIF,
-					rpmsg_priv->ipi_txbase + IPI_REG_INTSTS); // clear
+		       rpmsg_priv->ipi_txbase + IPI_REG_INTSTS); // clear
 	/* Irq handler requested by remote */
 
 	/* get shared momory region */
@@ -1211,11 +1242,14 @@ static struct ma35_rpmsg_priv *ma35_rpmsg_register(struct device *parent, struct
 	}
 
 	rpdev = kzalloc(sizeof(*rpdev), GFP_KERNEL);
-	if (!rpdev)
-		return ERR_PTR(-ENOMEM);
-
-	if(ma35_ipi_register(rpmsg_priv, node))
+	if (!rpdev) {
+		ret = -ENOMEM;
 		goto unregister_dev;
+	}
+
+	ret = ma35_ipi_register(rpmsg_priv, node);
+	if (ret)
+		goto free_rpdev;
 
 	rpdev->rpmsg_priv = rpmsg_priv;
 	rpdev->rpdev.ops = &ma35_rpmsg_device_ops;
@@ -1230,9 +1264,10 @@ static struct ma35_rpmsg_priv *ma35_rpmsg_register(struct device *parent, struct
 
 	return rpmsg_priv;
 
+free_rpdev:
+	kfree(rpdev);
 unregister_dev:
 	device_unregister(&rpmsg_priv->dev);
-	kfree(rpmsg_priv);
 	return ERR_PTR(ret);
 }
 
@@ -1243,7 +1278,7 @@ static int ma35_rpmsg_probe(struct platform_device *pdev)
 
 	rpmsg_priv = ma35_rpmsg_register(&pdev->dev, node);
 
-	return 0;
+	return PTR_ERR_OR_ZERO(rpmsg_priv);
 }
 
 static int ma35_rpmsg_remove_device(struct device *dev, void *data)
@@ -1258,7 +1293,7 @@ static int ma35_rpmsg_remove_priv(struct device *dev, void *data)
 	struct ma35_rpmsg_priv *priv = to_ma35_rpmsg_priv(dev);
 	int ret;
 
-	if(priv->bdthread) {
+	if (priv->bdthread) {
 		kthread_stop(priv->bdthread);
 		wake_up_interruptible(&priv->bd_event);
 	}
@@ -1288,11 +1323,12 @@ static int ma35_rpmsg_suspend(struct platform_device *pdev, pm_message_t state)
 
 static void periodic_work_handler(struct work_struct *work)
 {
-	struct ma35_rpmsg_priv *rpmsg_priv = container_of(to_delayed_work(work), struct ma35_rpmsg_priv, dwork);
+	struct ma35_rpmsg_priv *rpmsg_priv =
+		container_of(to_delayed_work(work), struct ma35_rpmsg_priv, dwork);
 	struct resource_table *rsc_table;
 
 	rsc_table = (struct resource_table *)rpmsg_priv->shmem_base;
-	if(rpmsg_priv->resumeflow) {
+	if (rpmsg_priv->resumeflow) {
 		rsc_table->reserved[1] = IPI_CMD_REQUEST;
 		ma35_rpmsg_notify_remote(rpmsg_priv);
 		schedule_delayed_work(&rpmsg_priv->dwork, msecs_to_jiffies(500));
@@ -1353,7 +1389,6 @@ static void __exit ma35_rpmsg_dev_exit(void)
 	platform_driver_unregister(&ma35_rpmsg_driver);
 }
 module_exit(ma35_rpmsg_dev_exit);
-
 
 MODULE_DESCRIPTION("Nuvoton MA35 series AMP driver");
 MODULE_LICENSE("GPL v2");

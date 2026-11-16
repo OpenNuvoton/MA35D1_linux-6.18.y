@@ -1,16 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
- *  linux/drivers/rpmsg/ma35d1_rpmsg.c
- *
  *  MA35D1 rpmsg driver
  *
- *
  *  Copyright (C) 2020 Nuvoton Technology Corp.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 #include <linux/clk.h>
@@ -33,7 +25,7 @@
 #include <linux/mailbox_client.h>
 #include "rpmsg_internal.h"
 
-#define MAX_SHARE_MEMERY_SIZE	16*1024
+#define MAX_SHARE_MEMERY_SIZE	(16 * 1024)
 #define SRAM_ADDRESS_BOUNDARY	0x24020000
 
 #define COMMAND_RECEIVE_MSG 0x60
@@ -53,8 +45,8 @@ struct ma35d1_rpmsg_priv {
 	u32 tx_ack_flag;
 	u32 rx_ack_flag;
 	bool enable_v2_arch;
-	unsigned char __iomem *tx_mem_start_addr;
-	unsigned char __iomem *rx_mem_start_addr;
+	unsigned char *tx_mem_start_addr;
+	unsigned char *rx_mem_start_addr;
 	struct ma35d1_rpmsg_endpoint *ma35d1_ept;
 };
 
@@ -83,28 +75,29 @@ static void ma35d1_rpmsg_recv_from_remote(struct mbox_client *cl, void *msg)
 
 	u32 *data = (u32 *)msg;
 
-	if(priv->ma35d1_ept == NULL) {
-		dev_err(&priv->dev, "The endpoint has been freed!! \n");
+	if (!priv->ma35d1_ept) {
+		dev_err(&priv->dev, "The endpoint has been freed!!\n");
 		return;
 	}
 
 	switch (data[0]) {
-		case COMMAND_RECEIVE_MSG:
-			ret = ept->cb(ept->rpdev, priv->rx_mem_start_addr, data[1], ept->priv, RPMSG_ADDR_ANY);
-			if (ret < 0)
-				dev_err(&priv->dev, "failed to get share memery data \n");
+	case COMMAND_RECEIVE_MSG:
+		ret = ept->cb(ept->rpdev, priv->rx_mem_start_addr, data[1], ept->priv,
+			      RPMSG_ADDR_ANY);
+		if (ret < 0)
+			dev_err(&priv->dev, "failed to get share memery data\n");
 
-			priv->rx_ack_flag = 1;
-			wake_up_interruptible_all(&priv->tx_ack_event);
-		break;
+		priv->rx_ack_flag = 1;
+		wake_up_interruptible_all(&priv->tx_ack_event);
+	break;
 
-		case COMMAND_SEND_ACK:
-			priv->tx_ack_flag = 1;
-			wake_up_interruptible_all(&priv->tx_ack_event);
-		break;
+	case COMMAND_SEND_ACK:
+		priv->tx_ack_flag = 1;
+		wake_up_interruptible_all(&priv->tx_ack_event);
+	break;
 
-		default:
-			dev_dbg(dev, "no message was found %d\n", *data);
+	default:
+		dev_dbg(dev, "no message was found %d\n", *data);
 	}
 }
 
@@ -119,6 +112,7 @@ static void ma35d1_rpmsg_destroy_ept(struct rpmsg_endpoint *ept)
 {
 	struct ma35d1_rpmsg_endpoint *ma35d1_ept = to_ma35d1_rpmsg_endpoint(ept);
 	struct ma35d1_rpmsg_priv *ma35d1_priv = ma35d1_ept->ma35d1_priv;
+
 	kref_put(&ept->refcount, ma35d1_rpmsg_ept_release);
 	ma35d1_priv->ma35d1_ept = NULL;
 }
@@ -193,12 +187,12 @@ static __poll_t ma35d1_rpmsg_poll(struct rpmsg_endpoint *ept, struct file *filp,
 
 	poll_wait(filp, &priv->tx_ack_event, wait);
 
-	if(priv->tx_ack_flag == 1){
+	if (priv->tx_ack_flag == 1) {
 		mask |= EPOLLOUT;
 		priv->tx_ack_flag = 0;
 	}
 
-	if(priv->rx_ack_flag == 1){
+	if (priv->rx_ack_flag == 1) {
 		mask |= EPOLLIN;
 		priv->rx_ack_flag = 0;
 	}
@@ -211,7 +205,9 @@ static int ma35d1_rpmsg_announce_create(struct rpmsg_device *rpdev)
 	return 0;
 }
 
-static struct rpmsg_endpoint *ma35d1_rpmsg_create_ept(struct rpmsg_device *rpdev, rpmsg_rx_cb_t cb, void *priv, struct rpmsg_channel_info chinfo)
+static struct rpmsg_endpoint *ma35d1_rpmsg_create_ept(struct rpmsg_device *rpdev,
+						      rpmsg_rx_cb_t cb, void *priv,
+						      struct rpmsg_channel_info chinfo)
 {
 	struct ma35d1_rpmsg_endpoint *nept;
 	struct ma35d1_rpmsg_device *ndev = to_ma35d1_rpmsg_device(rpdev);
@@ -278,9 +274,8 @@ static void ma35d1_rpmsg_mbox_set(struct ma35d1_rpmsg_priv *priv)
 	priv->mbox_client.tx_tout        = 1;
 
 	priv->mbox_chan = mbox_request_channel(&priv->mbox_client, 0);
-	if (IS_ERR(priv->mbox_chan)) {
-		dev_err(dev, "mbox_request_channel failed: %ld\n", PTR_ERR(priv->mbox_chan));
-	}
+	if (IS_ERR(priv->mbox_chan))
+		dev_err(dev, "mbox_request_channel failed: %pe\n", priv->mbox_chan);
 }
 
 static struct ma35d1_rpmsg_priv *ma35d1_rpmsg_register(struct device *parent,
@@ -298,13 +293,15 @@ static struct ma35d1_rpmsg_priv *ma35d1_rpmsg_register(struct device *parent,
 		return ERR_PTR(-ENOMEM);
 
 	node1 = of_parse_phandle(node, "memory-region", 0);
-	if (node) {
+	if (node1) {
 		ret = of_address_to_resource(node1, 0, &r);
+		of_node_put(node1);
 		if (ret == 0) {
 			share_mem_addr = r.start;
 			share_mem_size  = resource_size(&r);
-			priv->tx_mem_start_addr = memremap(share_mem_addr, share_mem_size, MEMREMAP_WC);
-			priv->rx_mem_start_addr = priv->tx_mem_start_addr + share_mem_size/2;
+			priv->tx_mem_start_addr = memremap(share_mem_addr, share_mem_size,
+							   MEMREMAP_WC);
+			priv->rx_mem_start_addr = priv->tx_mem_start_addr + share_mem_size / 2;
 		} else {
 			dev_err(&priv->dev, "fail to parse share memory region!\n");
 			return ERR_PTR(ret);
@@ -347,12 +344,12 @@ static struct ma35d1_rpmsg_priv *ma35d1_rpmsg_register(struct device *parent,
 
 	ret = rpmsg_ctrldev_register_device(&ndev->rpdev);
 	if (ret) {
-		dev_err(&priv->dev, "failed to register rpmsg chrdev \n");
+		dev_err(&priv->dev, "failed to register rpmsg chrdev\n");
 		goto unregister_dev;
 	}
 
 	dev_info(parent, "RPMsg v%d engine with %s shared memory supported.\n",
-			priv->enable_v2_arch ? 2 : 1, isddr ? "DRAM" : "SRAM");
+		 priv->enable_v2_arch ? 2 : 1, isddr ? "DRAM" : "SRAM");
 
 	return priv;
 
@@ -425,7 +422,6 @@ static void __exit ma35d1_rpmsg_dev_exit(void)
 	platform_driver_unregister(&ma35d1_rpmsg_driver);
 }
 module_exit(ma35d1_rpmsg_dev_exit);
-
 
 MODULE_AUTHOR("ma35d1, Inc.");
 MODULE_DESCRIPTION("ma35d1");
