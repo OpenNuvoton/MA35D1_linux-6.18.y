@@ -49,7 +49,7 @@ static const struct ohci_driver_overrides ohci_ma35d1_drv_overrides __initconst 
 
 static int ohci_hcd_ma35d1_probe(struct platform_device *pdev)
 {
-	struct usb_hcd *hcd = 0;
+	struct usb_hcd *hcd = NULL;
 	const struct hc_driver *driver = &ohci_ma35d1_hc_driver;
 	struct ma35d1_ohci_priv *ma35d1_ohci;
 	struct resource *res;
@@ -74,15 +74,15 @@ static int ohci_hcd_ma35d1_probe(struct platform_device *pdev)
 
 	ma35d1_ohci = hcd_to_ma35d1_ohci_priv(hcd);
 
-	ma35d1_ohci->clk = of_clk_get(pdev->dev.of_node, 0);
+	ma35d1_ohci->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(ma35d1_ohci->clk)) {
 		ret = PTR_ERR(ma35d1_ohci->clk);
 		dev_err(&pdev->dev, "failed to get core clk: %d\n", ret);
-		return -ENOENT;
+		goto fail_hcd;
 	}
 	ret = clk_prepare_enable(ma35d1_ohci->clk);
 	if (ret)
-		return -ENOENT;
+		goto fail_hcd;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	hcd->regs = devm_ioremap_resource(&pdev->dev, res);
@@ -95,7 +95,7 @@ static int ohci_hcd_ma35d1_probe(struct platform_device *pdev)
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
-		ret = -ENXIO;
+		ret = irq;
 		goto fail_resource;
 	}
 
@@ -109,9 +109,9 @@ static int ohci_hcd_ma35d1_probe(struct platform_device *pdev)
 	}
 
 fail_resource:
-	usb_put_hcd(hcd);
-fail_hcd:
 	clk_disable_unprepare(ma35d1_ohci->clk);
+fail_hcd:
+	usb_put_hcd(hcd);
 	return ret;
 }
 
@@ -121,8 +121,8 @@ static void ohci_hcd_ma35d1_remove(struct platform_device *pdev)
 	struct ma35d1_ohci_priv *ma35d1_ohci = hcd_to_ma35d1_ohci_priv(hcd);
 
 	usb_remove_hcd(hcd);
-	usb_put_hcd(hcd);
 	clk_disable_unprepare(ma35d1_ohci->clk);
+	usb_put_hcd(hcd);
 }
 
 /* work with hotplug and coldplug */

@@ -42,7 +42,7 @@ struct ma35d1_ehci_priv {
 	int id;
 	struct regmap *sysregmap;
 	struct clk *clk;
-	int oc_active_level;
+	u32 oc_active_level;
 };
 
 static struct hc_driver __read_mostly ehci_ma35d1_hc_driver;
@@ -76,9 +76,9 @@ static void ma35d1_start_ehci(struct platform_device *pdev)
 	/*                                 0 => USBH Host over-current detect is low-active  */
 	regmap_read(ma35d1_ehci->sysregmap, REG_SYS_MISCFCR0, &reg);
 	if (ma35d1_ehci->oc_active_level)
-		regmap_write(ma35d1_ehci->sysregmap, REG_SYS_MISCFCR0, (reg | (1<<12)));
+		regmap_write(ma35d1_ehci->sysregmap, REG_SYS_MISCFCR0, reg | BIT(12));
 	else
-		regmap_write(ma35d1_ehci->sysregmap, REG_SYS_MISCFCR0, (reg & ~(1<<12)));
+		regmap_write(ma35d1_ehci->sysregmap, REG_SYS_MISCFCR0, reg & ~BIT(12));
 }
 
 static void ma35d1_stop_ehci(struct platform_device *pdev)
@@ -87,9 +87,8 @@ static void ma35d1_stop_ehci(struct platform_device *pdev)
 	struct ma35d1_ehci_priv *ma35d1_ehci = hcd_to_ma35d1_ehci_priv(hcd);
 
 	dev_dbg(&pdev->dev, "stop\n");
-	clk_disable(ma35d1_ehci->clk);
+	clk_disable_unprepare(ma35d1_ehci->clk);
 }
-
 
 /*-------------------------------------------------------------------------*/
 
@@ -110,8 +109,8 @@ static int ehci_ma35d1_drv_probe(struct platform_device *pdev)
 	pr_debug("Initializing MA35D1 EHCI...\n");
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq <= 0) {
-		retval = -ENODEV;
+	if (irq < 0) {
+		retval = irq;
 		goto fail_create_hcd;
 	}
 
@@ -143,30 +142,29 @@ static int ehci_ma35d1_drv_probe(struct platform_device *pdev)
 
 	ma35d1_ehci = hcd_to_ma35d1_ehci_priv(hcd);
 
-	ma35d1_ehci->clk = of_clk_get(pdev->dev.of_node, 0);
+	ma35d1_ehci->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(ma35d1_ehci->clk)) {
 		retval = PTR_ERR(ma35d1_ehci->clk);
 		dev_err(&pdev->dev, "failed to get core clk: %d\n", retval);
-		retval = -ENOENT;
 		goto fail_request_resource;
 	}
 
 	retval = clk_prepare_enable(ma35d1_ehci->clk);
 	if (retval) {
 		dev_err(&pdev->dev, "failed to enable usb host clk: %d\n", retval);
-		retval = -ENOENT;
 		goto fail_request_resource;
 	}
 
 	ma35d1_ehci->sysregmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node,
-				 "nuvoton,sys");
-	if (!ma35d1_ehci->sysregmap) {
+								 "nuvoton,sys");
+	if (IS_ERR(ma35d1_ehci->sysregmap)) {
 		dev_err(&pdev->dev, "failed to map sysreg!\n");
-		retval = -ENOENT;
-		goto fail_request_resource;
+		retval = PTR_ERR(ma35d1_ehci->sysregmap);
+		goto fail_disable_clk;
 	}
 
-	if (of_property_read_u32(pdev->dev.of_node, "oc-active-level", &(ma35d1_ehci->oc_active_level))) {
+	if (of_property_read_u32(pdev->dev.of_node, "oc-active-level",
+				 &ma35d1_ehci->oc_active_level)) {
 		ma35d1_ehci->oc_active_level = 0;
 		dev_warn(&pdev->dev, "EHCI oc-active-level not found!!\n");
 	}
@@ -187,12 +185,12 @@ static int ehci_ma35d1_drv_probe(struct platform_device *pdev)
 
 	retval = usb_add_hcd(hcd, irq, IRQF_SHARED);
 	if (retval)
-		goto fail_add_hcd;
+		goto fail_disable_clk;
 	device_wakeup_enable(hcd->self.controller);
 	pm_runtime_forbid(&pdev->dev);
 	return retval;
 
-fail_add_hcd:
+fail_disable_clk:
 	ma35d1_stop_ehci(pdev);
 fail_request_resource:
 	usb_put_hcd(hcd);
@@ -208,10 +206,8 @@ static void ehci_ma35d1_drv_remove(struct platform_device *pdev)
 	struct usb_hcd *hcd = platform_get_drvdata(pdev);
 
 	usb_remove_hcd(hcd);
-	usb_put_hcd(hcd);
-
 	ma35d1_stop_ehci(pdev);
-
+	usb_put_hcd(hcd);
 }
 
 static int __maybe_unused ehci_ma35d1_drv_suspend(struct device *dev)
