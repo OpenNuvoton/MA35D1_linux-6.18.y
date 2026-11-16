@@ -49,15 +49,13 @@
 #define UART_TX_MAX_BUF_SIZE 128
 
 /* PDMA mode time-out */
-#define Time_Out_Frame_Count 2
-#define Time_Out_Low_Baudrate 115200
+#define TIME_OUT_FRAME_COUNT 2
+#define TIME_OUT_LOW_BAUDRATE 115200
 
 #define RDA_TOUT_IF (RDA_IF | TOUT_IF)
 #define RDA_PTO_IF  (RDA_IF | PTO_IF)
 
 static struct uart_driver ma35d1serial_reg;
-
-struct clk *clk;
 
 struct uart_ma35d1_port {
 	struct uart_port port;
@@ -75,7 +73,7 @@ struct uart_ma35d1_port {
 	u32 pdma_reqsel_rx;
 	struct ma35d1_ip_rx_dma dma_rx;
 	struct ma35d1_mem_alloc dest_mem_p;
-	struct ma35d1_dma_done dma_Rx_done;
+	struct ma35d1_dma_done dma_rx_done;
 	u64 pdma_rx_vir_addr1;
 	u64 pdma_rx_vir_addr2;
 	u64 pdma_rx_phy_addr1;
@@ -88,11 +86,11 @@ struct uart_ma35d1_port {
 	struct ma35d1_ip_tx_dma dma_tx;
 	struct ma35d1_mem_alloc src_mem_p;
 	struct ma35d1_dma_done dma_slave_done;
-	struct ma35d1_dma_done dma_Tx_done;
+	struct ma35d1_dma_done dma_tx_done;
 
 	unsigned int tx_dma_len;
 	unsigned char uart_pdma_enable_flag;
-	unsigned char Tx_pdma_busy_flag;
+	unsigned char tx_pdma_busy_flag;
 	unsigned int baud_rate;
 	unsigned int console_baud_rate;
 	unsigned int console_line;
@@ -130,7 +128,7 @@ static inline void serial_out(struct uart_ma35d1_port *p, int offset, int value)
 }
 
 #ifdef EN_UART_PDMA_RX
-static void ma35d1_Rx_dma_callback(void *arg)
+static void ma35d1_rx_dma_callback(void *arg)
 {
 	struct ma35d1_dma_done *done = arg;
 	struct uart_ma35d1_port *p;
@@ -160,12 +158,9 @@ static void ma35d1_Rx_dma_callback(void *arg)
 
 	if (!p->port.state || !pdma_rx->chan_rx ||
 	    p->dest_mem_p.size != UART_RX_BUF_SIZE) {
-		pr_err_ratelimited(
-			"UART%d RX DMA invalid state: state=%p chan=%p size=%u\n",
-			p->port.line,
-			p->port.state,
-			pdma_rx->chan_rx,
-			(unsigned int)p->dest_mem_p.size);
+		pr_err_ratelimited("UART%d RX DMA invalid state: state=%p chan=%p size=%u\n",
+				   p->port.line, p->port.state, pdma_rx->chan_rx,
+				   (unsigned int)p->dest_mem_p.size);
 		goto out_unlock;
 	}
 
@@ -176,9 +171,8 @@ static void ma35d1_Rx_dma_callback(void *arg)
 
 	if (status == DMA_ERROR ||
 	    state.residue > UART_RX_BUF_SIZE) {
-		pr_err_ratelimited(
-			"UART%d RX DMA invalid status=%d residue=%u\n",
-			p->port.line, status, state.residue);
+		pr_err_ratelimited("UART%d RX DMA invalid status=%d residue=%u\n",
+				   p->port.line, status, state.residue);
 		valid_dma_data = false;
 	} else if (state.residue == UART_RX_BUF_SIZE) {
 		count = 0;
@@ -189,9 +183,7 @@ static void ma35d1_Rx_dma_callback(void *arg)
 	}
 
 	if (count < 0 || count > UART_RX_BUF_SIZE) {
-		pr_err_ratelimited(
-			"UART%d RX DMA invalid count=%d\n",
-			p->port.line, count);
+		pr_err_ratelimited("UART%d RX DMA invalid count=%d\n", p->port.line, count);
 		count = 0;
 		valid_dma_data = false;
 	}
@@ -214,17 +206,13 @@ static void ma35d1_Rx_dma_callback(void *arg)
 		p->dest_mem_p.vir_addr = p->pdma_rx_vir_addr1;
 
 	} else {
-		pr_err_ratelimited(
-			"UART%d RX DMA invalid buffer address=%pad\n",
-			p->port.line,
-			&p->dest_mem_p.phy_addr);
+		pr_err_ratelimited("UART%d RX DMA invalid buffer address=%pad\n",
+				   p->port.line, &p->dest_mem_p.phy_addr);
 		goto stop_rx;
 	}
 
 	if (!rx_buf) {
-		pr_err_ratelimited(
-			"UART%d RX DMA buffer is NULL\n",
-			p->port.line);
+		pr_err_ratelimited("UART%d RX DMA buffer is NULL\n", p->port.line);
 		goto stop_rx;
 	}
 
@@ -244,11 +232,8 @@ static void ma35d1_Rx_dma_callback(void *arg)
 			   serial_in(p, UART_REG_IER) |
 			   RXPDMAEN | TIME_OUT_EN);
 	} else {
-		pr_err_ratelimited(
-			"UART%d RX DMA restart failed: desc=%p cookie=%d\n",
-			p->port.line,
-			pdma_rx->rxdesc,
-			pdma_rx->cookie);
+		pr_err_ratelimited("UART%d RX DMA restart failed: desc=%p cookie=%d\n",
+				   p->port.line, pdma_rx->rxdesc, pdma_rx->cookie);
 	}
 
 	dma_sync_single_for_cpu(pdma_rx->chan_rx->device->dev,
@@ -262,9 +247,8 @@ static void ma35d1_Rx_dma_callback(void *arg)
 		if (copied_count != count) {
 			p->port.icount.overrun++;
 
-			pr_warn_ratelimited(
-				"UART%d RX DMA TTY copy incomplete: expected=%d actual=%u\n",
-				p->port.line, count, copied_count);
+			pr_warn_ratelimited("UART%d RX DMA TTY copy incomplete: expected=%d actual=%u\n",
+					    p->port.line, count, copied_count);
 		}
 	}
 
@@ -275,9 +259,8 @@ static void ma35d1_Rx_dma_callback(void *arg)
 		if (copied_fifo != i) {
 			p->port.icount.overrun++;
 
-			pr_warn_ratelimited(
-				"UART%d RX FIFO TTY copy incomplete: expected=%u actual=%u\n",
-				p->port.line, i, copied_fifo);
+			pr_warn_ratelimited("UART%d RX FIFO TTY copy incomplete: expected=%u actual=%u\n",
+					    p->port.line, i, copied_fifo);
 		}
 	}
 
@@ -296,16 +279,14 @@ stop_rx:
 	serial_out(p, UART_REG_IER,
 		   serial_in(p, UART_REG_IER) & ~RXPDMAEN);
 
-	pr_err_ratelimited(
-		"UART%d RX DMA stopped due to error\n",
-		p->port.line);
+	pr_err_ratelimited("UART%d RX DMA stopped due to error\n", p->port.line);
 
 out_unlock:
 	spin_unlock_irqrestore(&p->port.lock, flags);
 }
 #endif
 
-static void ma35d1_Tx_dma_callback(void *arg)
+static void ma35d1_tx_dma_callback(void *arg)
 {
 	struct ma35d1_dma_done *done = arg;
 	struct uart_ma35d1_port *p = (struct uart_ma35d1_port *)done->callback_param;
@@ -320,11 +301,11 @@ static void ma35d1_Tx_dma_callback(void *arg)
 		uart_write_wakeup(&p->port);
 
 	if (!kfifo_is_empty(&tport->xmit_fifo) && !uart_tx_stopped(&p->port)) {
-		p->Tx_pdma_busy_flag = 1;
+		p->tx_pdma_busy_flag = 1;
 		ma35d1_prepare_TX_dma(p);
 		serial_out(p, UART_REG_IER, (serial_in(p, UART_REG_IER) | TXPDMAEN));
 	} else {
-		p->Tx_pdma_busy_flag = 0;
+		p->tx_pdma_busy_flag = 0;
 	}
 
 	uart_port_unlock_irqrestore(&p->port, flags);
@@ -334,12 +315,12 @@ static void ma35d1_Tx_dma_callback(void *arg)
 static void ma35d1_uart_cal_pdma_time_out(struct uart_ma35d1_port *p, unsigned int baud)
 {
 	unsigned int lcr;
-	unsigned int pdma_time_out_base = 180000000 * Time_Out_Frame_Count / 256;
+	unsigned int pdma_time_out_base = 180000000 * TIME_OUT_FRAME_COUNT / 256;
 	unsigned int time_out_prescaler = 1;
 	unsigned int bit_length;
 	unsigned int time_out;
 
-	if (baud > Time_Out_Low_Baudrate) {
+	if (baud > TIME_OUT_LOW_BAUDRATE) {
 		p->pdma_time_out_count = 255 * 16;
 		p->pdma_time_out_prescaler = 7 * 16;
 		return;
@@ -409,18 +390,13 @@ static void ma35d1_prepare_RX_dma(struct uart_ma35d1_port *p)
 		void *buf;
 		dma_addr_t buf_dma;
 
-		buf = kmalloc((UART_RX_BUF_SIZE + 64) * 2, GFP_KERNEL);
+		buf = kmalloc((UART_RX_BUF_SIZE + 64) * 2, GFP_ATOMIC);
 		if (!buf)
 			return;
 
-		buf_dma = dma_map_single(
-			pdma_rx->chan_rx->device->dev,
-			buf, (UART_RX_BUF_SIZE + 64) * 2,
-			DMA_FROM_DEVICE);
-
-		ret = dma_mapping_error(pdma_rx->chan_rx->device->dev,
-					buf_dma);
-		if (ret) {
+		buf_dma = dma_map_single(pdma_rx->chan_rx->device->dev, buf,
+					 (UART_RX_BUF_SIZE + 64) * 2, DMA_FROM_DEVICE);
+		if (dma_mapping_error(pdma_rx->chan_rx->device->dev, buf_dma)) {
 			dev_err(p->port.dev, "RX DMA mapping error\n");
 			kfree(buf);
 			return;
@@ -428,15 +404,10 @@ static void ma35d1_prepare_RX_dma(struct uart_ma35d1_port *p)
 
 		p->dest_mem_p.vir_addr = (u64)(unsigned long)buf;
 		p->dest_mem_p.phy_addr = buf_dma;
-
 		p->pdma_rx_vir_addr1 = p->dest_mem_p.vir_addr;
 		p->pdma_rx_phy_addr1 = p->dest_mem_p.phy_addr;
-
-		p->pdma_rx_vir_addr2 =
-			p->pdma_rx_vir_addr1 + UART_RX_BUF_SIZE + 64;
-		p->pdma_rx_phy_addr2 =
-			p->pdma_rx_phy_addr1 + UART_RX_BUF_SIZE + 64;
-
+		p->pdma_rx_vir_addr2 = p->pdma_rx_vir_addr1 + UART_RX_BUF_SIZE + 64;
+		p->pdma_rx_phy_addr2 = p->pdma_rx_phy_addr1 + UART_RX_BUF_SIZE + 64;
 		p->dest_mem_p.size = UART_RX_BUF_SIZE;
 	}
 
@@ -472,12 +443,9 @@ static void ma35d1_prepare_RX_dma(struct uart_ma35d1_port *p)
 	pdma_rx->sgrx[0].dma_address = sg_addr;
 	pdma_rx->sgrx[0].dma_length = sg_size;
 
-	pdma_rx->rxdesc = dmaengine_prep_slave_sg(
-		pdma_rx->chan_rx,
-		pdma_rx->sgrx,
-		sg_loop,
-		DMA_DEV_TO_MEM,
-		DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+	pdma_rx->rxdesc = dmaengine_prep_slave_sg(pdma_rx->chan_rx, pdma_rx->sgrx, sg_loop,
+						  DMA_DEV_TO_MEM,
+						  DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
 
 	if (!pdma_rx->rxdesc) {
 		dev_err_ratelimited(p->port.dev,
@@ -485,12 +453,12 @@ static void ma35d1_prepare_RX_dma(struct uart_ma35d1_port *p)
 		return;
 	}
 
-	pdma_rx->rxdesc->callback = ma35d1_Rx_dma_callback;
+	pdma_rx->rxdesc->callback = ma35d1_rx_dma_callback;
 
-	p->dma_Rx_done.callback_param = p;
-	p->dma_Rx_done.timeout = 0;
+	p->dma_rx_done.callback_param = p;
+	p->dma_rx_done.timeout = 0;
 
-	pdma_rx->rxdesc->callback_param = &p->dma_Rx_done;
+	pdma_rx->rxdesc->callback_param = &p->dma_rx_done;
 
 	pdma_rx->cookie = dmaengine_submit(pdma_rx->rxdesc);
 
@@ -508,24 +476,24 @@ static void ma35d1_prepare_RX_dma(struct uart_ma35d1_port *p)
 
 static void ma35d1_prepare_TX_dma(struct uart_ma35d1_port *p)
 {
-	struct ma35d1_ip_tx_dma *pdma_tx = &(p->dma_tx);
+	struct ma35d1_ip_tx_dma *pdma_tx = &p->dma_tx;
 	struct ma35d1_peripheral pcfg;
 	struct tty_port *tport = &p->port.state->port;
 	int ret;
 
 	if (p->src_mem_p.size == 0) {
 		p->src_mem_p.size = UART_XMIT_SIZE;
-		p->src_mem_p.vir_addr = (u64) (kmalloc(p->src_mem_p.size, GFP_KERNEL));
+		p->src_mem_p.vir_addr = (u64)kmalloc(p->src_mem_p.size, GFP_KERNEL);
 		p->src_mem_p.phy_addr = dma_map_single(pdma_tx->chan_tx->device->dev,
-				   (void *)p->src_mem_p.vir_addr, p->src_mem_p.size, DMA_TO_DEVICE);
+						       (void *)p->src_mem_p.vir_addr,
+						       p->src_mem_p.size, DMA_TO_DEVICE);
 		ret = dma_mapping_error(pdma_tx->chan_tx->device->dev, p->src_mem_p.phy_addr);
 		if (ret)
 			dev_err(p->port.dev, "src mapping error.\n");
 	}
 
 	p->tx_dma_len = kfifo_out(&tport->xmit_fifo,
-				   (unsigned char *)p->src_mem_p.vir_addr,
-				   UART_XMIT_SIZE);
+				  (unsigned char *)p->src_mem_p.vir_addr, UART_XMIT_SIZE);
 	if (p->tx_dma_len == 0)
 		return;
 
@@ -544,34 +512,33 @@ static void ma35d1_prepare_TX_dma(struct uart_ma35d1_port *p)
 	pdma_tx->slave_config.peripheral_size = sizeof(pcfg);
 
 	dmaengine_terminate_all(pdma_tx->chan_tx);
-	dmaengine_slave_config(pdma_tx->chan_tx, &(pdma_tx->slave_config));
+	dmaengine_slave_config(pdma_tx->chan_tx, &pdma_tx->slave_config);
 	sg_init_table(pdma_tx->sgtx, 1);
 	pdma_tx->sgtx[0].dma_address = p->src_mem_p.phy_addr;
 	pdma_tx->sgtx[0].dma_length = p->tx_dma_len;
 
 	pdma_tx->txdesc = dmaengine_prep_slave_sg(pdma_tx->chan_tx, pdma_tx->sgtx, 1,
-					DMA_MEM_TO_DEV, DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+						  DMA_MEM_TO_DEV,
+						  DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
 
 	if (!pdma_tx->txdesc) {
 		dev_err(p->port.dev, "pdma->txdes==NULL.\n");
 		kfifo_in(&tport->xmit_fifo, (unsigned char *)p->src_mem_p.vir_addr, p->tx_dma_len);
 		return;
 	}
-	pdma_tx->txdesc->callback = ma35d1_Tx_dma_callback;
-	p->dma_Tx_done.callback_param = p;
-	pdma_tx->txdesc->callback_param = &(p->dma_Tx_done);
+	pdma_tx->txdesc->callback = ma35d1_tx_dma_callback;
+	p->dma_tx_done.callback_param = p;
+	pdma_tx->txdesc->callback_param = &p->dma_tx_done;
 	dmaengine_submit(pdma_tx->txdesc);
 	dma_async_issue_pending(pdma_tx->chan_tx);
 }
 
 static void rs485_start_rx(struct uart_ma35d1_port *port)
 {
-
 }
 
 static void rs485_stop_rx(struct uart_ma35d1_port *port)
 {
-
 }
 
 static inline void __stop_tx(struct uart_ma35d1_port *p)
@@ -605,7 +572,7 @@ static void ma35d1serial_start_tx(struct uart_port *port)
 		rs485_stop_rx(up);
 
 	if (up->uart_pdma_enable_flag == 1) {
-		if (up->Tx_pdma_busy_flag == 1)
+		if (up->tx_pdma_busy_flag == 1)
 			return;
 
 		if (kfifo_is_empty(&tport->xmit_fifo)) {
@@ -613,7 +580,7 @@ static void ma35d1serial_start_tx(struct uart_port *port)
 			return;
 		}
 
-		up->Tx_pdma_busy_flag = 1;
+		up->tx_pdma_busy_flag = 1;
 		ma35d1_prepare_TX_dma(up);
 		serial_out(up, UART_REG_IER, (serial_in(up, UART_REG_IER) | TXPDMAEN));
 	} else {
@@ -637,7 +604,6 @@ static void ma35d1serial_stop_rx(struct uart_port *port)
 
 static void ma35d1serial_enable_ms(struct uart_port *port)
 {
-
 }
 
 static void receive_chars(struct uart_ma35d1_port *up)
@@ -699,7 +665,7 @@ static void receive_chars(struct uart_ma35d1_port *up)
 			tty_flip_buffer_push(&up->port.state->port);
 			spin_unlock_irqrestore(&up->port.lock, flags);
 			up->max_count = 0;
-			if ((isr & TOUT_IF) && (dcnt == 0))
+			if ((isr & TOUT_IF) && dcnt == 0)
 				goto tout_end;
 		}
 
@@ -776,7 +742,7 @@ static void receive_chars_no_pdma(struct uart_ma35d1_port *up)
 			tty_flip_buffer_push(&up->port.state->port);
 			spin_unlock_irqrestore(&up->port.lock, flags);
 			up->max_count = 0;
-			if ((isr & PTO_IF) && (dcnt == 0))
+			if ((isr & PTO_IF) && dcnt == 0)
 				goto tout_end1;
 		}
 		if ((isr & RDA_PTO_IF) == RDA_IF) {
@@ -842,12 +808,10 @@ static void transmit_chars(struct uart_ma35d1_port *up)
 
 static unsigned int check_modem_status(struct uart_ma35d1_port *up)
 {
-	unsigned int status = 0;
-
 	if (0)
 		wake_up_interruptible(&up->port.state->port.delta_msr_wait);
 
-	return status;
+	return 0;
 }
 
 static irqreturn_t ma35d1serial_interrupt(int irq, void *dev_id)
@@ -857,7 +821,7 @@ static irqreturn_t ma35d1serial_interrupt(int irq, void *dev_id)
 	unsigned long flags;
 #ifdef EN_UART_PDMA_RX
 	unsigned char ch[64];
-	uint32_t i = 0;
+	u32 i = 0;
 	struct tty_port *tty_port = &up->port.state->port;
 	int read_fifo_count = 0;
 #endif
@@ -878,7 +842,8 @@ static irqreturn_t ma35d1serial_interrupt(int irq, void *dev_id)
 			if (i > 0) {
 				read_fifo_count = tty_insert_flip_string(tty_port, ch, i);
 				if (read_fifo_count != i)
-					dev_err(up->port.dev, "Rx dropping %d bytes\n", (i - read_fifo_count));
+					dev_err(up->port.dev, "Rx dropping %d bytes\n",
+						(i - read_fifo_count));
 
 				up->port.icount.rx += read_fifo_count;
 				tty_flip_buffer_push(tty_port);
@@ -899,11 +864,11 @@ static irqreturn_t ma35d1serial_interrupt(int irq, void *dev_id)
 
 		check_modem_status(up);
 
-		if (isr & THRE_INT){
-   			uart_port_lock_irqsave(&up->port, &flags);
-        		transmit_chars(up);
-        		uart_port_unlock_irqrestore(&up->port, flags);
-    		}
+		if (isr & THRE_INT) {
+			uart_port_lock_irqsave(&up->port, &flags);
+			transmit_chars(up);
+			uart_port_unlock_irqrestore(&up->port, flags);
+		}
 
 		if (fsr & (BIF | FEF | PEF | RX_OVER_IF | TX_OVER_IF))
 			serial_out(up, UART_REG_FSR, (BIF | FEF | PEF | RX_OVER_IF | TX_OVER_IF));
@@ -995,9 +960,9 @@ static int ma35d1serial_startup(struct uart_port *port)
 	unsigned long flags;
 	struct uart_ma35d1_port *up = (struct uart_ma35d1_port *)port;
 	struct tty_struct *tty = port->state->port.tty;
-	struct ma35d1_ip_tx_dma *pdma_tx = &(up->dma_tx);
+	struct ma35d1_ip_tx_dma *pdma_tx = &up->dma_tx;
 #ifdef EN_UART_PDMA_RX
-	struct ma35d1_ip_rx_dma *pdma_rx = &(up->dma_rx);
+	struct ma35d1_ip_rx_dma *pdma_rx = &up->dma_rx;
 #endif
 
 	if (up->uart_pdma_enable_flag == 1) {
@@ -1007,7 +972,8 @@ static int ma35d1serial_startup(struct uart_port *port)
 			retval = PTR_ERR(pdma_rx->chan_rx);
 			pdma_rx->chan_rx = NULL;
 			if (retval != -EPROBE_DEFER)
-				dev_err(up->port.dev, "RX DMA channel request error (%d).\n", retval);
+				dev_err(up->port.dev, "RX DMA channel request error (%d).\n",
+					retval);
 			return retval;
 		}
 #endif
@@ -1016,7 +982,8 @@ static int ma35d1serial_startup(struct uart_port *port)
 			retval = PTR_ERR(pdma_tx->chan_tx);
 			pdma_tx->chan_tx = NULL;
 			if (retval != -EPROBE_DEFER)
-				dev_err(up->port.dev, "TX DMA channel request error (%d).\n", retval);
+				dev_err(up->port.dev, "TX DMA channel request error (%d).\n",
+					retval);
 #ifdef EN_UART_PDMA_RX
 			dma_release_channel(pdma_rx->chan_rx);
 			pdma_rx->chan_rx = NULL;
@@ -1050,7 +1017,8 @@ static int ma35d1serial_startup(struct uart_port *port)
 #ifdef EN_UART_PDMA_RX
 		serial_out(up, UART_REG_IER, RTO_IEN | RLS_IEN | BUFERR_IEN | TIME_OUT_EN);
 #else
-		serial_out(up, UART_REG_IER, RTO_IEN | RDA_IEN | RLS_IEN | BUFERR_IEN | TIME_OUT_EN);
+		serial_out(up, UART_REG_IER,
+			   RTO_IEN | RDA_IEN | RLS_IEN | BUFERR_IEN | TIME_OUT_EN);
 #endif
 	else
 		serial_out(up, UART_REG_IER, RTO_IEN | RDA_IEN | TIME_OUT_EN | BUFERR_IEN);
@@ -1073,9 +1041,9 @@ static int ma35d1serial_startup(struct uart_port *port)
 static void ma35d1serial_shutdown(struct uart_port *port)
 {
 	struct uart_ma35d1_port *up = (struct uart_ma35d1_port *)port;
-	struct ma35d1_ip_tx_dma *pdma_tx = &(up->dma_tx);
+	struct ma35d1_ip_tx_dma *pdma_tx = &up->dma_tx;
 #ifdef EN_UART_PDMA_RX
-	struct ma35d1_ip_rx_dma *pdma_rx = &(up->dma_rx);
+	struct ma35d1_ip_rx_dma *pdma_rx = &up->dma_rx;
 #endif
 
 	if (up->uart_pdma_enable_flag == 1) {
@@ -1092,7 +1060,7 @@ static void ma35d1serial_shutdown(struct uart_port *port)
 		if (up->src_mem_p.size != 0)
 			kfree((void *)up->src_mem_p.vir_addr);
 
-		up->Tx_pdma_busy_flag = 0;
+		up->tx_pdma_busy_flag = 0;
 #ifdef EN_UART_PDMA_RX
 		up->dest_mem_p.size = 0;
 #endif
@@ -1119,6 +1087,9 @@ ma35d1serial_set_termios(struct uart_port *port, struct ktermios *termios,
 			 const struct ktermios *old)
 {
 	struct uart_ma35d1_port *up = (struct uart_ma35d1_port *)port;
+#ifdef EN_UART_PDMA_RX
+	struct ma35d1_ip_rx_dma *pdma_rx = &up->dma_rx;
+#endif
 	unsigned int lcr = 0;
 	unsigned long flags;
 	unsigned int baud, quot;
@@ -1190,16 +1161,18 @@ ma35d1serial_set_termios(struct uart_port *port, struct ktermios *termios,
 	spin_unlock_irqrestore(&up->port.lock, flags);
 
 #ifdef EN_UART_PDMA_RX
-	if (up->uart_pdma_enable_flag == 1) {
-		if (up->baud_rate != baud) {
-			up->baud_rate = baud;
-			ma35d1_uart_cal_pdma_time_out(up, baud);
-			ma35d1_prepare_RX_dma(up);
-			spin_lock_irqsave(&up->port.lock, flags);
-			serial_out(up, UART_REG_IER, (serial_in(up, UART_REG_IER) | RXPDMAEN));
-			spin_unlock_irqrestore(&up->port.lock, flags);
-		}
-	}
+	if (up->uart_pdma_enable_flag != 1 || up->baud_rate == baud || !pdma_rx->chan_rx)
+		return;
+
+	ma35d1_uart_cal_pdma_time_out(up, baud);
+	ma35d1_prepare_RX_dma(up);
+	if (!pdma_rx->rxdesc || dma_submit_error(pdma_rx->cookie))
+		return;
+
+	up->baud_rate = baud;
+	spin_lock_irqsave(&up->port.lock, flags);
+	serial_out(up, UART_REG_IER, (serial_in(up, UART_REG_IER) | RXPDMAEN));
+	spin_unlock_irqrestore(&up->port.lock, flags);
 #endif
 }
 
@@ -1214,9 +1187,9 @@ static void ma35d1serial_pm(struct uart_port *port, unsigned int state, unsigned
 static void ma35d1serial_release_port(struct uart_port *port)
 {
 	struct uart_ma35d1_port *p = (struct uart_ma35d1_port *)port;
-	struct ma35d1_ip_tx_dma *pdma_tx = &(p->dma_tx);
+	struct ma35d1_ip_tx_dma *pdma_tx = &p->dma_tx;
 #ifdef EN_UART_PDMA_RX
-	struct ma35d1_ip_rx_dma *pdma_rx = &(p->dma_rx);
+	struct ma35d1_ip_rx_dma *pdma_rx = &p->dma_rx;
 #endif
 
 	if (p->uart_pdma_enable_flag == 1) {
@@ -1297,7 +1270,6 @@ static int ma35d1serial_config_rs485(struct uart_port *port,
 static int ma35d1serial_ioctl(struct uart_port *port, unsigned int cmd, unsigned long arg)
 {
 	switch (cmd) {
-
 	default:
 		return -ENOIOCTLCMD;
 	}
@@ -1348,6 +1320,7 @@ static void __init ma35d1serial_init_ports(void)
 	if (!clk_node)
 		clk_node = of_find_compatible_node(NULL, NULL, "nuvoton,ma35h0-clk");
 	clk_base = of_iomap(clk_node, 0);
+	of_node_put(clk_node);
 	if (!clk_base)
 		return;
 
@@ -1355,27 +1328,32 @@ static void __init ma35d1serial_init_ports(void)
 	__raw_writel(__raw_readl(clk_base + 0x20) & ~(3 << 16), clk_base + 0x20);
 
 	for_each_matching_node(np, ma35d1_serial_of_match) {
-
 		if (!of_find_property(np, "ma35d1-console", NULL) &&
 		    !of_find_property(np, "ma35d0-console", NULL) &&
 		    !of_find_property(np, "ma35h0-console", NULL))
 			continue;
 
-		if (of_property_read_u32_array(np, "reg", val32, 4) != 0)
-			return;
+		if (of_property_read_u32_array(np, "reg", val32, 4) != 0) {
+			of_node_put(np);
+			break;
+		}
 
 		p->port.iobase = val32[1];
 		p->port.membase = ioremap(p->port.iobase, 0x10000);
 		p->port.ops = &ma35d1serial_ops;
 
-		if (of_property_read_u32_array(np, "port-number", val32, 1) != 0)
-			return;
+		if (of_property_read_u32_array(np, "port-number", val32, 1) != 0) {
+			of_node_put(np);
+			break;
+		}
 
 		p->port.line = val32[0];
 		p->port.uartclk = 24000000;
 
+		of_node_put(np);
 		break;
 	}
+	iounmap(clk_base);
 }
 
 #if defined(CONFIG_SERIAL_MA35D1_CONSOLE) || \
@@ -1670,9 +1648,9 @@ static int ma35d1serial_suspend(struct platform_device *dev, pm_message_t state)
 
 	up = &ma35d1serial_ports[i];
 	if (device_may_wakeup(&dev->dev)) {
-
 		/* FIFO trigger from device tree, RTS trigger level 8 bytes */
-		serial_out(up, UART_REG_FCR, serial_in(up, UART_REG_FCR) | up->fifo_threshold | 0x20000);
+		serial_out(up, UART_REG_FCR,
+			   serial_in(up, UART_REG_FCR) | up->fifo_threshold | 0x20000);
 		enable_irq_wake(up->port.irq);
 	}
 
@@ -1701,7 +1679,6 @@ static int ma35d1serial_resume(struct platform_device *dev)
 
 		/* FIFO trigger level 4 byte, RTS trigger level 8 bytes */
 		serial_out(up, UART_REG_FCR, serial_in(up, UART_REG_FCR) | 0x10 | 0x20000);
-
 	}
 
 	if (i == 0) {
@@ -1720,7 +1697,6 @@ static struct platform_driver ma35d1serial_driver = {
 	.resume = ma35d1serial_resume,
 	.driver = {
 		.name = "ma35d1-uart",
-		.owner = THIS_MODULE,
 		.of_match_table = of_match_ptr(ma35d1_serial_of_match),
 	},
 };
