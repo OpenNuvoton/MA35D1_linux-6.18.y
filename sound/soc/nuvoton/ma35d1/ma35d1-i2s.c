@@ -73,6 +73,7 @@ struct ma35d1_i2s {
 	void __iomem *base;
 	struct clk *clk;
 	struct device *dev;
+	/* Protects register updates and active/configured stream tracking. */
 	spinlock_t lock;
 
 	struct snd_dmaengine_dai_dma_data dma_tx;
@@ -173,9 +174,9 @@ static int ma35d1_i2s_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 
 	spin_lock_irqsave(&i2s->lock, flags);
 	ma35d1_i2s_update_bits(i2s, MA35D1_I2S_CTL0,
-				 MA35D1_I2S_CTL0_FORMAT_MASK |
-				 MA35D1_I2S_CTL0_SLAVE,
-				 value);
+			       MA35D1_I2S_CTL0_FORMAT_MASK |
+			       MA35D1_I2S_CTL0_SLAVE,
+			       value);
 	spin_unlock_irqrestore(&i2s->lock, flags);
 
 	return 0;
@@ -295,16 +296,16 @@ static int ma35d1_i2s_hw_params(struct snd_pcm_substream *substream,
 
 	ma35d1_i2s_write(i2s, MA35D1_I2S_CLKDIV, clkdiv);
 	ma35d1_i2s_update_bits(i2s, MA35D1_I2S_CTL0,
-				 MA35D1_I2S_CTL0_DATWIDTH_MASK |
-				 MA35D1_I2S_CTL0_CHWIDTH_MASK |
-				 MA35D1_I2S_CTL0_RXLCH |
-				 MA35D1_I2S_CTL0_ORDER |
-				 MA35D1_I2S_CTL0_MONO,
-				 ctl0);
+			       MA35D1_I2S_CTL0_DATWIDTH_MASK |
+			       MA35D1_I2S_CTL0_CHWIDTH_MASK |
+			       MA35D1_I2S_CTL0_RXLCH |
+			       MA35D1_I2S_CTL0_ORDER |
+			       MA35D1_I2S_CTL0_MONO,
+			       ctl0);
 	ma35d1_i2s_update_bits(i2s, MA35D1_I2S_CTL1,
-				 MA35D1_I2S_CTL1_PB16ORD |
-				 MA35D1_I2S_CTL1_PBWIDTH,
-				 ctl1);
+			       MA35D1_I2S_CTL1_PB16ORD |
+			       MA35D1_I2S_CTL1_PBWIDTH,
+			       ctl1);
 	spin_unlock_irqrestore(&i2s->lock, flags);
 
 	return 0;
@@ -351,10 +352,10 @@ static int ma35d1_i2s_trigger(struct snd_pcm_substream *substream, int cmd,
 
 		i2s->active_streams |= stream_bit;
 		ma35d1_i2s_update_bits(i2s, MA35D1_I2S_CTL0,
-					 enable | MA35D1_I2S_CTL0_MCLKEN |
-					 MA35D1_I2S_CTL0_I2SEN,
-					 enable | MA35D1_I2S_CTL0_MCLKEN |
-					 MA35D1_I2S_CTL0_I2SEN);
+				       enable | MA35D1_I2S_CTL0_MCLKEN |
+				       MA35D1_I2S_CTL0_I2SEN,
+				       enable | MA35D1_I2S_CTL0_MCLKEN |
+				       MA35D1_I2S_CTL0_I2SEN);
 		break;
 
 	case SNDRV_PCM_TRIGGER_STOP:
@@ -364,7 +365,7 @@ static int ma35d1_i2s_trigger(struct snd_pcm_substream *substream, int cmd,
 		value = i2s->active_streams ? 0 :
 			MA35D1_I2S_CTL0_I2SEN | MA35D1_I2S_CTL0_MCLKEN;
 		ma35d1_i2s_update_bits(i2s, MA35D1_I2S_CTL0,
-					 enable | value, 0);
+				       enable | value, 0);
 		break;
 
 	default:
@@ -529,17 +530,17 @@ static int ma35d1_i2s_probe(struct platform_device *pdev)
 
 	ma35d1_i2s_write(i2s, MA35D1_I2S_IEN, 0);
 	ma35d1_i2s_update_bits(i2s, MA35D1_I2S_CTL0,
-				 MA35D1_I2S_CTL0_RXPDMAEN |
-				 MA35D1_I2S_CTL0_TXPDMAEN |
-				 MA35D1_I2S_CTL0_RXEN |
-				 MA35D1_I2S_CTL0_TXEN |
-				 MA35D1_I2S_CTL0_MCLKEN |
-				 MA35D1_I2S_CTL0_I2SEN,
-				 0);
+			       MA35D1_I2S_CTL0_RXPDMAEN |
+			       MA35D1_I2S_CTL0_TXPDMAEN |
+			       MA35D1_I2S_CTL0_RXEN |
+			       MA35D1_I2S_CTL0_TXEN |
+			       MA35D1_I2S_CTL0_MCLKEN |
+			       MA35D1_I2S_CTL0_I2SEN,
+			       0);
 	ma35d1_i2s_update_bits(i2s, MA35D1_I2S_CTL1,
-				 MA35D1_I2S_CTL1_PB16ORD |
-				 MA35D1_I2S_CTL1_PBWIDTH,
-				 MA35D1_I2S_CTL1_PBWIDTH);
+			       MA35D1_I2S_CTL1_PB16ORD |
+			       MA35D1_I2S_CTL1_PBWIDTH,
+			       MA35D1_I2S_CTL1_PBWIDTH);
 
 	ret = devm_snd_soc_register_component(dev, &ma35d1_i2s_component,
 					      &ma35d1_i2s_dai, 1);
