@@ -163,7 +163,7 @@ static int ma35_spi_enable(struct ma35_spi *hw)
 	u32 val;
 
 	ma35_spi_update_bits(hw, MA35_SPI_CTL, MA35_SPI_CTL_SPIEN,
-			       MA35_SPI_CTL_SPIEN);
+			     MA35_SPI_CTL_SPIEN);
 
 	return readl_poll_timeout(hw->regs + MA35_SPI_STATUS, val,
 				  val & MA35_SPI_STATUS_SPIENSTS,
@@ -204,8 +204,8 @@ static int ma35_spi_reset_fifo(struct ma35_spi *hw)
 	u32 val;
 
 	ma35_spi_update_bits(hw, MA35_SPI_FIFOCTL,
-			       MA35_SPI_FIFOCTL_TXRST | MA35_SPI_FIFOCTL_RXRST,
-			       MA35_SPI_FIFOCTL_TXRST | MA35_SPI_FIFOCTL_RXRST);
+			     MA35_SPI_FIFOCTL_TXRST | MA35_SPI_FIFOCTL_RXRST,
+			     MA35_SPI_FIFOCTL_TXRST | MA35_SPI_FIFOCTL_RXRST);
 
 	/* Allow the reset request to be latched before polling status. */
 	udelay(1);
@@ -256,7 +256,7 @@ static int ma35_spi_set_speed(struct ma35_spi *hw,
 
 	clkdiv = divisor - 1;
 	ma35_spi_update_bits(hw, MA35_SPI_CLKDIV, MA35_SPI_CLKDIV_MASK,
-			       FIELD_PREP(MA35_SPI_CLKDIV_MASK, clkdiv));
+			     FIELD_PREP(MA35_SPI_CLKDIV_MASK, clkdiv));
 
 	xfer->effective_speed_hz = clk_rate / divisor;
 
@@ -578,9 +578,9 @@ static int ma35_spi_dma_transfer(struct ma35_spi *hw,
 	reinit_completion(&hw->dma_tx_done);
 
 	rxdesc = dmaengine_prep_slave_sg(hw->dma_rx,
-					xfer->rx_sg.sgl, xfer->rx_sg.nents,
-					DMA_DEV_TO_MEM,
-					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+					 xfer->rx_sg.sgl, xfer->rx_sg.nents,
+					 DMA_DEV_TO_MEM,
+					 DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
 	if (!rxdesc)
 		return -EIO;
 
@@ -592,9 +592,9 @@ static int ma35_spi_dma_transfer(struct ma35_spi *hw,
 		goto err_abort;
 
 	txdesc = dmaengine_prep_slave_sg(hw->dma_tx,
-					xfer->tx_sg.sgl, xfer->tx_sg.nents,
-					DMA_MEM_TO_DEV,
-					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+					 xfer->tx_sg.sgl, xfer->tx_sg.nents,
+					 DMA_MEM_TO_DEV,
+					 DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
 	if (!txdesc) {
 		ret = -EIO;
 		goto err_abort;
@@ -612,8 +612,8 @@ static int ma35_spi_dma_transfer(struct ma35_spi *hw,
 	dma_async_issue_pending(hw->dma_tx);
 
 	ma35_spi_write(hw, MA35_SPI_PDMACTL,
-			 MA35_SPI_PDMACTL_TXPDMAEN |
-			 MA35_SPI_PDMACTL_RXPDMAEN);
+		       MA35_SPI_PDMACTL_TXPDMAEN |
+		       MA35_SPI_PDMACTL_RXPDMAEN);
 
 	ret = ma35_spi_enable(hw);
 	if (ret) {
@@ -703,7 +703,7 @@ out_disable:
 }
 
 static void ma35_spi_set_cs_level(struct ma35_spi *hw, unsigned int cs,
-				   bool assert)
+				  bool assert)
 {
 	unsigned long flags;
 	u32 mask;
@@ -812,9 +812,9 @@ static int ma35_spi_hw_init(struct ma35_spi *hw)
 		   MA35_SPI_CTL_RXNEG;
 
 	ma35_spi_update_bits(hw, MA35_SPI_CTL, ctl_mask,
-			       MA35_SPI_CTL_TXNEG |
-			       FIELD_PREP(MA35_SPI_CTL_DWIDTH_MASK,
-					  MA35_SPI_DEFAULT_BPW));
+			     MA35_SPI_CTL_TXNEG |
+			     FIELD_PREP(MA35_SPI_CTL_DWIDTH_MASK,
+					MA35_SPI_DEFAULT_BPW));
 
 	ssctl_mask = MA35_SPI_SSCTL_SS0 |
 		     MA35_SPI_SSCTL_SS1 |

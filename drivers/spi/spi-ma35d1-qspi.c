@@ -141,7 +141,7 @@ static int nuvoton_qspi_read_dma_reqsel(struct device *dev,
 }
 
 static int nuvoton_qspi_config_dma(struct nuvoton_qspi *qspi,
-				    enum dma_slave_buswidth width)
+				   enum dma_slave_buswidth width)
 {
 	struct dma_slave_config config = { };
 	int ret;
@@ -216,7 +216,7 @@ static int nuvoton_qspi_request_dma(struct nuvoton_qspi *qspi)
 	}
 
 	ret = nuvoton_qspi_read_dma_reqsel(dev, "nuvoton,pdma-reqsel-rx",
-					    &qspi->dma_rx_config.reqsel);
+					   &qspi->dma_rx_config.reqsel);
 	if (ret) {
 		ret = dev_err_probe(dev, ret,
 				    "missing RX PDMA request selection\n");
@@ -224,7 +224,7 @@ static int nuvoton_qspi_request_dma(struct nuvoton_qspi *qspi)
 	}
 
 	ret = nuvoton_qspi_read_dma_reqsel(dev, "nuvoton,pdma-reqsel-tx",
-					    &qspi->dma_tx_config.reqsel);
+					   &qspi->dma_tx_config.reqsel);
 	if (ret) {
 		ret = dev_err_probe(dev, ret,
 				    "missing TX PDMA request selection\n");
@@ -497,12 +497,12 @@ static int nuvoton_qspi_pio_txrx(struct nuvoton_qspi *qspi,
 }
 
 static unsigned long nuvoton_qspi_dma_timeout(struct nuvoton_qspi *qspi,
-					       unsigned int len)
+					      unsigned int len)
 {
 	u64 timeout_ms;
 
 	timeout_ms = DIV_ROUND_UP_ULL((u64)len * 8 * 1000,
-				       qspi->speed_hz);
+				      qspi->speed_hz);
 	timeout_ms += 100;
 	timeout_ms = max_t(u64, timeout_ms, NUVOTON_QSPI_DMA_TIMEOUT_MS);
 
@@ -728,7 +728,7 @@ out_terminate:
 out_restore_width:
 	if (width_configured)
 		nuvoton_qspi_set_dma_width(qspi,
-				       DMA_SLAVE_BUSWIDTH_1_BYTE);
+					   DMA_SLAVE_BUSWIDTH_1_BYTE);
 
 out_unmap:
 	if (shared_mapping) {
@@ -770,9 +770,9 @@ static int nuvoton_qspi_txrx(struct nuvoton_qspi *qspi, const void *txbuf,
 					   NUVOTON_QSPI_DMA_MAX_BYTES);
 
 		ret = nuvoton_qspi_dma_txrx_chunk(qspi,
-					    tx ? tx + offset : NULL,
-					    rx ? rx + offset : NULL,
-					    chunk);
+						  tx ? tx + offset : NULL,
+						  rx ? rx + offset : NULL,
+						  chunk);
 		if (ret)
 			return ret;
 
