@@ -19,7 +19,6 @@
 #include <linux/watchdog.h>
 #include <linux/of.h>
 
-
 #define REG_WWDT_RLD		0x00		/* WWDT Reload Counter Register */
 #define REG_WWDT_CR			0x04		/* WWDT Control Register */
 #define REG_WWDT_SR			0x08		/* WWDT Status Register */
@@ -47,23 +46,22 @@ static struct ma35d1_wwdt *ma35d1_wwdt;
 
 static int ma35d1wwdt_ping(struct watchdog_device *wdd)
 {
-	__raw_writel(RELOAD_WORD, ma35d1_wwdt->base+REG_WWDT_RLD);
+	__raw_writel(RELOAD_WORD, ma35d1_wwdt->base + REG_WWDT_RLD);
 	return 0;
 }
 
 static int ma35d1wwdt_start(struct watchdog_device *wdd)
 {
-	__raw_writel(WWDT_CONFIG, ma35d1_wwdt->base+REG_WWDT_CR);
+	__raw_writel(WWDT_CONFIG, ma35d1_wwdt->base + REG_WWDT_CR);
 	return 0;
 }
 
 /*
- *  This function always return error, we define it here simply because stop() is mandatory operation.
+ *  This function always returns an error; stop() is a mandatory operation.
  *  Due to the fact that WWDT register can only be programmed once, so there is NO WAY OUT!!!
  */
 static int ma35d1wwdt_stop(struct watchdog_device *wdd)
 {
-
 	return -EBUSY;
 }
 
@@ -71,7 +69,7 @@ static unsigned int ma35d1wwdt_get_timeleft(struct watchdog_device *wdd)
 {
 	unsigned int time_left;
 
-	time_left = __raw_readl(ma35d1_wwdt->base+REG_WWDT_CVR) / 32;
+	time_left = __raw_readl(ma35d1_wwdt->base + REG_WWDT_CVR) / 32;
 
 	return time_left;
 }
@@ -96,11 +94,10 @@ static struct watchdog_device ma35d1_wdd = {
 	.timeout = 2,
 };
 
-
 static int ma35d1wwdt_probe(struct platform_device *pdev)
 {
 	int ret = 0;
-	const char *clkmux, *clkgate;
+	const char *clkmux = NULL, *clkgate = NULL;
 	struct clk *clk, *clksrc;
 
 	ma35d1_wwdt = devm_kzalloc(&pdev->dev, sizeof(struct ma35d1_wwdt), GFP_KERNEL);
@@ -134,7 +131,8 @@ static int ma35d1wwdt_probe(struct platform_device *pdev)
 	if (IS_ERR(clksrc)) {
 		if (PTR_ERR(clksrc) != -ENOENT) {
 			dev_err(&pdev->dev, "failed to get clock source\n");
-			return PTR_ERR(clksrc);
+			ret = PTR_ERR(clksrc);
+			goto err_disable_clk;
 		}
 		clksrc = NULL;
 	}
@@ -145,26 +143,27 @@ static int ma35d1wwdt_probe(struct platform_device *pdev)
 	ma35d1_wdd.info = &ma35d1wwdt_info;
 	ma35d1_wdd.ops = &ma35d1wwdt_ops;
 
-	ret = devm_watchdog_register_device(ma35d1_wwdt->dev, &ma35d1_wdd);
+	ret = watchdog_register_device(&ma35d1_wdd);
 	if (ret) {
 		dev_err(&pdev->dev, "err register window watchdog device\n");
-		return ret;
+		goto err_disable_clk;
 	}
 
 	platform_set_drvdata(pdev, ma35d1_wwdt);
 	return 0;
 
+err_disable_clk:
+	clk_disable_unprepare(clk);
+	return ret;
 }
 
 static void ma35d1wwdt_remove(struct platform_device *pdev)
 {
-
 	watchdog_unregister_device(&ma35d1_wdd);
 	// There's no way out~~~~
 	/* You can check-out any time you like
 	 * But you can never leave!
 	 */
-
 }
 
 #ifdef CONFIG_PM
@@ -191,7 +190,6 @@ static const struct of_device_id ma35d1_wwdt_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, ma35d1_wwdt_of_match);
 
-
 static struct platform_driver ma35d1wwdt_driver = {
 	.probe	= ma35d1wwdt_probe,
 	.remove = ma35d1wwdt_remove,
@@ -200,7 +198,6 @@ static struct platform_driver ma35d1wwdt_driver = {
 	.driver = {
 		.name	= "ma35d1-wwdt",
 		.of_match_table = of_match_ptr(ma35d1_wwdt_of_match),
-		.owner	= THIS_MODULE,
 	},
 };
 
