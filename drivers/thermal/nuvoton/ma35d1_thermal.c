@@ -89,7 +89,6 @@ static int ma35d1_tsen_get_temp(struct thermal_zone_device *th, int *temp)
 	return 0;
 }
 
-
 #ifdef CONFIG_PM_SLEEP
 static int ma35d1_tsen_suspend(struct device *dev)
 {
@@ -110,7 +109,7 @@ static int ma35d1_tsen_resume(struct device *dev)
 }
 #endif /* CONFIG_PM_SLEEP */
 
-SIMPLE_DEV_PM_OPS(ma35d1_tsen_pm_ops, ma35d1_tsen_suspend, ma35d1_tsen_resume);
+static SIMPLE_DEV_PM_OPS(ma35d1_tsen_pm_ops, ma35d1_tsen_suspend, ma35d1_tsen_resume);
 
 static const struct thermal_zone_device_ops ma35d1_tz_ops = {
 	.get_temp	= ma35d1_tsen_get_temp,
@@ -145,9 +144,11 @@ static int ma35d1_tsen_probe(struct platform_device *pdev)
 	/* Populate sensor */
 	sensor->regmap  = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "nuvoton,ma35d1-sys");
 	if (IS_ERR(sensor->regmap))
-		sensor->regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "nuvoton,ma35d0-sys");
+		sensor->regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node,
+								 "nuvoton,ma35d0-sys");
 	if (IS_ERR(sensor->regmap))
-		sensor->regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node, "nuvoton,ma35h0-sys");
+		sensor->regmap = syscon_regmap_lookup_by_phandle(pdev->dev.of_node,
+								 "nuvoton,ma35h0-sys");
 	if (IS_ERR(sensor->regmap)) {
 		dev_err(&pdev->dev, "Failed to get SYS register base\n");
 		return -ENODEV;
