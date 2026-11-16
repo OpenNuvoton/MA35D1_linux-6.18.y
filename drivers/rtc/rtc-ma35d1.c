@@ -262,9 +262,6 @@ static int ma35d1_rtc_read_time(struct device *dev, struct rtc_time *tm)
 {
 	struct ma35d1_rtc *rtc = dev_get_drvdata(dev);
 	u32 timeval, clrval, wdayval;
-	u32 intsts;
-
-	intsts = rtc_reg_read(rtc, REG_RTC_INTSTS);
 
 	if (rtc->lxt_failed)
 		return -EIO;
@@ -518,7 +515,6 @@ static void ma35d1_rtc_remove(struct platform_device *pdev)
 	device_init_wakeup(&pdev->dev, 0);
 
 	platform_set_drvdata(pdev, NULL);
-
 }
 
 static int ma35d1_rtc_suspend(struct platform_device *pdev, pm_message_t state)
@@ -555,7 +551,6 @@ static const struct of_device_id ma35d1_rtc_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, ma35d1_rtc_of_match);
 
-
 static struct platform_driver ma35d1_rtc_driver = {
 	.remove     = ma35d1_rtc_remove,
 	.suspend    = ma35d1_rtc_suspend,
@@ -563,7 +558,6 @@ static struct platform_driver ma35d1_rtc_driver = {
 	.probe      = ma35d1_rtc_probe,
 	.driver		= {
 		.name	= "ma35d1-rtc",
-		.owner	= THIS_MODULE,
 		.of_match_table = ma35d1_rtc_of_match,
 	},
 };
