@@ -26,7 +26,6 @@
 #include <linux/mfd/syscon.h>
 #include <linux/mfd/ma35d1-sys.h>
 #include <linux/videodev2.h>
-#include <linux/workqueue.h>
 #include <media/v4l2-dev.h>
 #include <media/v4l2-event.h>
 #include <media/v4l2-mem2mem.h>
@@ -128,37 +127,6 @@ static void hantro_job_finish(struct hantro_dev *vpu,
 	v4l2_m2m_job_finish(vpu->m2m_dev, ctx->fh.m2m_ctx);
 }
 
-void hantro_irq_done(struct hantro_dev *vpu, unsigned int bytesused,
-		     enum vb2_buffer_state result)
-{
-	struct hantro_ctx *ctx = v4l2_m2m_get_curr_priv(vpu->m2m_dev);
-
-	/*
-	 * If cancel_delayed_work returns false
-	 * the timeout expired. The watchdog is running,
-	 * and will take care of finishing the job.
-	 */
-	if (cancel_delayed_work(&vpu->watchdog_work))
-		hantro_job_finish(vpu, ctx, bytesused, result);
-}
-EXPORT_SYMBOL(hantro_irq_done);
-
-void hantro_watchdog(struct work_struct *work)
-{
-	struct hantro_dev *vpu;
-	struct hantro_ctx *ctx;
-
-	vpu = container_of(to_delayed_work(work),
-			   struct hantro_dev, watchdog_work);
-	ctx = v4l2_m2m_get_curr_priv(vpu->m2m_dev);
-	if (ctx) {
-		dev_err(ctx->dev->dev, "frame processing timed out!\n");
-		ctx->codec_ops->reset(ctx);
-		hantro_job_finish(vpu, ctx, 0, VB2_BUF_STATE_ERROR);
-	}
-}
-EXPORT_SYMBOL(hantro_watchdog);
-
 void hantro_prepare_run(struct hantro_ctx *ctx)
 {
 	struct vb2_v4l2_buffer *src_buf;
@@ -176,18 +144,15 @@ void hantro_finish_run(struct hantro_ctx *ctx)
 	src_buf = hantro_get_src_buf(ctx);
 	v4l2_ctrl_request_complete(src_buf->vb2_buf.req_obj.req,
 				   &ctx->ctrl_handler);
-
-	/* Kick the watchdog. */
-	schedule_delayed_work(&ctx->dev->watchdog_work,
-			      msecs_to_jiffies(5000));
 }
 EXPORT_SYMBOL(hantro_finish_run);
 
 static void device_run(void *priv)
 {
 	struct hantro_ctx *ctx = priv;
+	struct hantro_dev *vpu = ctx->dev;
 	struct vb2_v4l2_buffer *src, *dst;
-	// int ret;
+	enum vb2_buffer_state result;
 
 	src = hantro_get_src_buf(ctx);
 	dst = hantro_get_dst_buf(ctx);
@@ -202,7 +167,15 @@ static void device_run(void *priv)
 		return;
 	}
 
+	/* Codec init/exit also access the core's shared DWL registers. */
+	mutex_lock(&vpu->lock);
+	vpu->dec_state = VB2_BUF_STATE_ERROR;
 	ctx->codec_ops->run(ctx);
+	result = vpu->dec_state;
+	mutex_unlock(&vpu->lock);
+
+	/* The synchronous codec must return before close can free its context. */
+	hantro_job_finish(vpu, ctx, 0, result);
 }
 
 bool hantro_is_encoder_ctx(const struct hantro_ctx *ctx)
@@ -769,8 +742,6 @@ static int hantro_probe(struct platform_device *pdev)
 
 	match = of_match_node(of_hantro_match, pdev->dev.of_node);
 	vpu->variant = match->data;
-
-	INIT_DELAYED_WORK(&vpu->watchdog_work, hantro_watchdog);
 
 	vpu->clock = of_clk_get(pdev->dev.of_node, 0);
 	if (IS_ERR(vpu->clock)) {

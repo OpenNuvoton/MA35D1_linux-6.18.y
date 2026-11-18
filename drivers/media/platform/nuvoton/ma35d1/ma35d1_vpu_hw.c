@@ -17,6 +17,7 @@
 #include "hantro_jpeg.h"
 #include "hantro_g1_regs.h"
 #include "hantro_h1_regs.h"
+#include "vc_hw_regs.h"
 
 /*
  * Supported formats.
@@ -171,34 +172,35 @@ static const struct hantro_fmt ma35d1_vpu_dec_fmts[] = {
 static irqreturn_t ma35d1_vdpu_irq(int irq, void *dev_id)
 {
 	struct hantro_dev *vpu = dev_id;
-	u32 status;
+	u32 dec_status = vdpu_read(vpu, G1_REG_INTERRUPT);
+	u32 pp_status = vdpu_read(vpu, VC_HW_PP_IRQ_REG * 4);
 
-	status = vdpu_read(vpu, G1_REG_INTERRUPT);
-	// printk("[%d] - vdec_irq, 0x%x\n", smp_processor_id(), status);
-	if (status & 0x100) {
-		vpu->dec_state = (status & G1_REG_INTERRUPT_DEC_RDY_INT) ?
+	if (!(dec_status & VC_HW_DEC_IRQ_PENDING) &&
+	    !(pp_status & VC_HW_PP_IRQ_PENDING))
+		return IRQ_NONE;
+
+	if (dec_status & VC_HW_DEC_IRQ_PENDING) {
+		vpu->dec_state = (dec_status & G1_REG_INTERRUPT_DEC_RDY_INT) ?
 				VB2_BUF_STATE_DONE : VB2_BUF_STATE_ERROR;
 		if (vpu->dec_state != VB2_BUF_STATE_DONE)
-			dev_err(vpu->dev, "%d DECODE ERROR !!  0x%x\n", __LINE__, status);
+			dev_err(vpu->dev, "%d DECODE ERROR !!  0x%x\n", __LINE__, dec_status);
 
-		//if (status & (1 << 24))
-		//	vpu->B_slice_detected = true;
-		vc_hw_engine_irq();
 		vdpu_write(vpu, 0, G1_REG_INTERRUPT);
 	}
 
-	status = vdpu_read(vpu, 60 * 4);     // swreg60 for PP
-	if (status & 0x100) {
-		vpu->dec_state = (status & G1_REG_INTERRUPT_DEC_RDY_INT) ?
+	if (pp_status & VC_HW_PP_IRQ_PENDING) {
+		vpu->dec_state = (pp_status & G1_REG_INTERRUPT_DEC_RDY_INT) ?
 				VB2_BUF_STATE_DONE : VB2_BUF_STATE_ERROR;
 		if (vpu->dec_state != VB2_BUF_STATE_DONE)
-			dev_err(vpu->dev, "%d DECODE ERROR !!  0x%x\n", __LINE__, status);
-		vc_hw_engine_irq();
-		vdpu_write(vpu, 0, 60 * 4);  // clear swreg60
+			dev_err(vpu->dev, "%d DECODE ERROR !!  0x%x\n", __LINE__, pp_status);
+		vdpu_write(vpu, 0, VC_HW_PP_IRQ_REG * 4);
 		if (vpu->dcultra_base)
 			writel_relaxed(readl_relaxed(vpu->dcultra_base + 0x1518) | 0x11,
 				       (vpu->dcultra_base + 0x1518));  // trigger display
 	}
+
+	/* Acknowledge both engines before another CPU can start the next job. */
+	vc_hw_engine_irq(dec_status, pp_status);
 	return IRQ_HANDLED;
 }
 
@@ -216,11 +218,10 @@ void hantro_g1_h264_dec_run(struct hantro_ctx *ctx)
 
 	hantro_finish_run(ctx);
 
-	vpu->dec_state = VB2_BUF_STATE_ERROR;  /* should be updated by decode done */
-
-	ma35d1_h264_dec_run(ctx);
-
-	hantro_irq_done(vpu, 0, vpu->dec_state);
+	if (ma35d1_h264_dec_run(ctx)) {
+		ctx->codec_ops->reset(ctx);
+		vpu->dec_state = VB2_BUF_STATE_ERROR;
+	}
 }
 EXPORT_SYMBOL(hantro_g1_h264_dec_run);
 
@@ -233,21 +234,27 @@ void hantro_g1_jpeg_dec_run(struct hantro_ctx *ctx)
 
 	hantro_finish_run(ctx);
 
-	vpu->dec_state = VB2_BUF_STATE_ERROR;  /* should be updated by decode done */
-
-	ma35d1_jpeg_dec_run(ctx);
-
-	hantro_irq_done(vpu, 0, vpu->dec_state);
+	if (ma35d1_jpeg_dec_run(ctx)) {
+		ctx->codec_ops->reset(ctx);
+		vpu->dec_state = VB2_BUF_STATE_ERROR;
+	}
 }
 EXPORT_SYMBOL(hantro_g1_jpeg_dec_run);
 
 void hantro_g1_pp_run(struct hantro_ctx *ctx)
 {
+	struct hantro_dev *vpu = ctx->dev;
+
 	hantro_prepare_run(ctx);
 
 	hantro_finish_run(ctx);
 
-	ma35d1_pp_run(ctx);
+	if (ma35d1_pp_run(ctx)) {
+		ctx->codec_ops->reset(ctx);
+		vpu->dec_state = VB2_BUF_STATE_ERROR;
+	} else {
+		vpu->dec_state = VB2_BUF_STATE_DONE;
+	}
 }
 EXPORT_SYMBOL(hantro_g1_pp_run);
 
@@ -255,6 +262,7 @@ static void ma35d1_vpu_dec_reset(struct hantro_ctx *ctx)
 {
 	struct hantro_dev *vpu = ctx->dev;
 
+	vdpu_write(vpu, VC_HW_PP_IRQ_DISABLE, VC_HW_PP_IRQ_REG * 4);
 	vdpu_write(vpu, G1_REG_INTERRUPT_DEC_IRQ_DIS, G1_REG_INTERRUPT);
 	vdpu_write(vpu, G1_REG_CONFIG_DEC_CLK_GATE_E, G1_REG_CONFIG);
 	vdpu_write(vpu, 1, G1_REG_SOFT_RESET);

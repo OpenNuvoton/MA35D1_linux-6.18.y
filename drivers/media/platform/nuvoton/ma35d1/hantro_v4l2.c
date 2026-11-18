@@ -739,8 +739,11 @@ static int hantro_start_streaming(struct vb2_queue *q, unsigned int count)
 			codec_mode = ctx->vpu_dst_fmt->codec_mode;
 
 		ctx->codec_ops = &ctx->dev->variant->codec_ops[codec_mode];
-		if (ctx->codec_ops->init)
+		if (ctx->codec_ops->init) {
+			mutex_lock(&ctx->dev->lock);
 			ret = ctx->codec_ops->init(ctx);
+			mutex_unlock(&ctx->dev->lock);
+		}
 	} else {
 	}
 
@@ -770,8 +773,11 @@ static void hantro_stop_streaming(struct vb2_queue *q)
 	struct hantro_ctx *ctx = vb2_get_drv_priv(q);
 
 	if (hantro_vq_is_coded(q)) {
-		if (ctx->codec_ops && ctx->codec_ops->exit)
+		if (ctx->codec_ops && ctx->codec_ops->exit) {
+			mutex_lock(&ctx->dev->lock);
 			ctx->codec_ops->exit(ctx);
+			mutex_unlock(&ctx->dev->lock);
+		}
 	}
 
 	/*

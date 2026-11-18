@@ -229,7 +229,6 @@ hantro_vdev_to_func(struct video_device *vdev)
  * @irqlock:		Spinlock to synchronize access to data structures
  *			shared with interrupt handlers.
  * @variant:		Hardware variant-specific parameters.
- * @watchdog_work:	Delayed work for hardware timeout handling.
  */
 struct hantro_dev {
 	struct v4l2_device v4l2_dev;
@@ -254,7 +253,6 @@ struct hantro_dev {
 	spinlock_t irqlock;
 	const struct hantro_variant *variant;
 	u32   dec_state;
-	struct delayed_work watchdog_work;
 };
 
 /**
@@ -468,7 +466,7 @@ extern int ma35d1_pp_run(struct hantro_ctx *ctx);
 
 extern int vc_hw_engine_init(struct hantro_dev *vpu);
 extern long vc_hw_engine_command(unsigned int command, void *argument);
-extern void vc_hw_engine_irq(void);
+void vc_hw_engine_irq(u32 dec_status, u32 pp_status);
 
 
 #endif /* HANTRO_H_ */

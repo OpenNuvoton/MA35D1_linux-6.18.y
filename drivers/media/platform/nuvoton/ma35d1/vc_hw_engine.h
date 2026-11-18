@@ -29,6 +29,6 @@ enum vc_hw_engine_command {
 
 int vc_hw_engine_init(struct hantro_dev *vpu);
 long vc_hw_engine_command(unsigned int command, void *argument);
-void vc_hw_engine_irq(void);
+void vc_hw_engine_irq(u32 dec_status, u32 pp_status);
 
 #endif /* VC_HW_ENGINE_H */

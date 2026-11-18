@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Copyright (c) 2026 Nuvoton Technology Corporation.
 
+#include <linux/errno.h>
 #include <linux/export.h>
 
 #include "vc_dwl_abi.h"
@@ -91,14 +92,17 @@ i32 DWLWaitHwReady(const void *instance, i32 core_id, u32 timeout)
 		.registers = vc_dwl_shadow_regs[core_id],
 		.size = vc_dwl_register_bytes(engine),
 	};
+	long ret;
 
 	(void)timeout;
 #ifdef DWL_USE_DEC_IRQ
-	vc_os_hw_wait(engine, &buffer);
-	return DWL_HW_WAIT_OK;
+	ret = vc_os_hw_wait(engine, &buffer);
 #else
-	return vc_os_hw_pull_registers(engine, &buffer) < 0 ?
-		DWL_HW_WAIT_ERROR : DWL_HW_WAIT_OK;
+	ret = vc_os_hw_pull_registers(engine, &buffer);
 #endif
+	if (ret == -ETIMEDOUT)
+		return DWL_HW_WAIT_TIMEOUT;
+
+	return ret < 0 ? DWL_HW_WAIT_ERROR : DWL_HW_WAIT_OK;
 }
 EXPORT_SYMBOL(DWLWaitHwReady);

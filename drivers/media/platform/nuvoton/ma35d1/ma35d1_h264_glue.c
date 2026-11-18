@@ -154,8 +154,6 @@ int ma35d1_h264_dec_run(struct hantro_ctx *ctx)
 
 	hctx->decInput.picture_id = hctx->picDecodeNumber;
 
-	mutex_lock(&vpu->lock);
-
 	if (ctx->pp_ctx.enable_pp && vpu->vc8k_cfg.pp_wait_vsync != 0) {
 		t0 = jiffies;
 		while (jiffies - t0 < vpu->vc8k_cfg.pp_wait_vsync) {
@@ -199,7 +197,6 @@ int ma35d1_h264_dec_run(struct hantro_ctx *ctx)
 			ret = h264_pp_init(ctx);
 			if (ret != 0) {
 				dev_err(vpu->dev, "%s - pp_init failed! 0x%x\n", __func__, ret);
-				mutex_unlock(&vpu->lock);
 				ctx->vc8k_err = -EINVAL;
 				return -EINVAL;
 			}
@@ -207,7 +204,6 @@ int ma35d1_h264_dec_run(struct hantro_ctx *ctx)
 			ret = vc_codec_pp_set_config(hctx->ppInst, &hctx->ppConfig);
 			if (ret != VC_CODEC_PP_OK) {
 				dev_err(vpu->dev, "%s - PPSetConfig failed! 0x%x\n", __func__, ret);
-				mutex_unlock(&vpu->lock);
 				ctx->vc8k_err = -EINVAL;
 				return -EINVAL;
 			}
@@ -299,20 +295,19 @@ int ma35d1_h264_dec_run(struct hantro_ctx *ctx)
 		break;
 	case VC_H264_HW_TIMEOUT:
 		dev_err(vpu->dev, "H264 HW Timeout\n");
-		break;
+		ctx->vc8k_err = -ETIMEDOUT;
+		return ctx->vc8k_err;
 
 	default:
 		dev_err(vpu->dev, " h264_dec_run - unhandled decode return code 0x%x !\n", ret);
 		ret = -EIO;
 		ctx->vc8k_err = ret;
-		mutex_unlock(&vpu->lock);
 		return ret;
 	}
 
 	if (hctx->decOutput.data_left != 0)
 		dev_warn(vpu->dev, " decOutput.data_left = %d\n", hctx->decOutput.data_left);
 
-	mutex_unlock(&vpu->lock);
 	return 0;
 }
 EXPORT_SYMBOL(ma35d1_h264_dec_run);

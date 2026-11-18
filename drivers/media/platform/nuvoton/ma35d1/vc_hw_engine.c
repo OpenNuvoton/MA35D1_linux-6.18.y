@@ -94,15 +94,18 @@ static long vc_hw_decoder_wait(const struct vc_hw_register_set *set)
 {
 	long result;
 
-	result = wait_event_interruptible_timeout(vc_dec_wait_queue,
-						  atomic_read(&vc_dec_irq),
-						  DEC_TIMEOUT);
+	/* A fatal userspace signal must not end an in-flight DMA operation. */
+	result = wait_event_timeout(vc_dec_wait_queue,
+				    atomic_read(&vc_dec_irq),
+				    msecs_to_jiffies(DEC_TIMEOUT));
 	if (result == 0)
-		result = wait_event_interruptible_timeout(vc_dec_wait_queue,
-							  atomic_read(&vc_dec_irq),
-							  1000);
-	if (result == 0)
+		result = wait_event_timeout(vc_dec_wait_queue,
+					    atomic_read(&vc_dec_irq),
+					    msecs_to_jiffies(1000));
+	if (result == 0) {
 		dev_warn(_vc8k_vpu->dev, "decoder interrupt timeout\n");
+		return -ETIMEDOUT;
+	}
 
 	atomic_set(&vc_dec_irq, 0);
 	return vc_hw_decoder_pull(set);
@@ -110,10 +113,12 @@ static long vc_hw_decoder_wait(const struct vc_hw_register_set *set)
 
 static long vc_hw_post_processor_wait(const struct vc_hw_register_set *set)
 {
-	if (!wait_event_interruptible_timeout(vc_pp_wait_queue,
-					      atomic_read(&vc_pp_irq),
-					      PP_TIMEOUT))
+	if (!wait_event_timeout(vc_pp_wait_queue,
+				atomic_read(&vc_pp_irq),
+				msecs_to_jiffies(PP_TIMEOUT))) {
 		dev_warn(_vc8k_vpu->dev, "post-processor interrupt timeout\n");
+		return -ETIMEDOUT;
+	}
 
 	atomic_set(&vc_pp_irq, 0);
 	return vc_hw_post_processor_pull(set);
@@ -179,25 +184,18 @@ int vc_hw_engine_init(struct hantro_dev *vpu)
 }
 EXPORT_SYMBOL(vc_hw_engine_init);
 
-void vc_hw_engine_irq(void)
+void vc_hw_engine_irq(u32 dec_status, u32 pp_status)
 {
-	bool handled = false;
-
-	if (vc_os_mmio_read32(VC_HW_DEC_IRQ_REG) &
-	    VC_HW_DEC_IRQ_PENDING) {
+	if (dec_status & VC_HW_DEC_IRQ_PENDING)
 		atomic_set(&vc_dec_irq, 1);
-		wake_up_interruptible_all(&vc_dec_wait_queue);
-		handled = true;
-	}
 
-	if (vc_os_mmio_read32(VC_HW_PP_IRQ_REG) &
-	    VC_HW_PP_IRQ_PENDING) {
+	if (pp_status & VC_HW_PP_IRQ_PENDING)
 		atomic_set(&vc_pp_irq, 1);
-		wake_up_interruptible_all(&vc_pp_wait_queue);
-		handled = true;
-	}
 
-	if (!handled)
-		dev_dbg(_vc8k_vpu->dev, "VC8000 interrupt had no engine status\n");
+	if (dec_status & VC_HW_DEC_IRQ_PENDING)
+		wake_up_all(&vc_dec_wait_queue);
+
+	if (pp_status & VC_HW_PP_IRQ_PENDING)
+		wake_up_all(&vc_pp_wait_queue);
 }
 EXPORT_SYMBOL(vc_hw_engine_irq);
