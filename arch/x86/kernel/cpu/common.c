@@ -1025,12 +1025,8 @@ void get_cpu_cap(struct cpuinfo_x86 *c)
 		c->x86_capability[CPUID_8000_0001_EDX] = edx;
 	}
 
-	if (c->extended_cpuid_level >= 0x80000007) {
-		cpuid(0x80000007, &eax, &ebx, &ecx, &edx);
-
-		c->x86_capability[CPUID_8000_0007_EBX] = ebx;
-		c->x86_power = edx;
-	}
+	if (c->extended_cpuid_level >= 0x80000007)
+		c->x86_power = cpuid_edx(0x80000007);
 
 	if (c->extended_cpuid_level >= 0x80000008) {
 		cpuid(0x80000008, &eax, &ebx, &ecx, &edx);
@@ -1299,7 +1295,7 @@ static const struct x86_cpu_id cpu_vuln_blacklist[] __initconst = {
 	VULNBL_AMD(0x17, RETBLEED | SMT_RSB | SRSO | VMSCAPE),
 	VULNBL_HYGON(0x18, RETBLEED | SMT_RSB | SRSO | VMSCAPE),
 	VULNBL_AMD(0x19, SRSO | TSA | VMSCAPE),
-	VULNBL_AMD(0x1a, SRSO | VMSCAPE),
+	VULNBL_AMD(0x1a, SRSO | TSA | VMSCAPE),
 	{}
 };
 
@@ -1564,7 +1560,8 @@ static void __init cpu_set_bug_bits(struct cpuinfo_x86 *c)
 
 	if (c->x86_vendor == X86_VENDOR_AMD) {
 		if (!cpu_has(c, X86_FEATURE_TSA_SQ_NO) ||
-		    !cpu_has(c, X86_FEATURE_TSA_L1_NO)) {
+		    !cpu_has(c, X86_FEATURE_TSA_L1_NO) ||
+		    !cpu_has(c, X86_FEATURE_TSA_FILL_NO)) {
 			if (cpu_matches(cpu_vuln_blacklist, TSA) ||
 			    /* Enable bug on Zen guests to allow for live migration. */
 			    (cpu_has(c, X86_FEATURE_HYPERVISOR) && cpu_has(c, X86_FEATURE_ZEN)))

@@ -1054,6 +1054,7 @@ static struct msi_ec_conf CONF12 __initdata = {
 
 static const char * const ALLOWED_FW_13[] __initconst = {
 	"1594EMS1.109", // MSI Prestige 16 Studio A13VE
+	"17L1EMS1.107", // MSI Katana GF76 11UEK
 	NULL
 };
 
@@ -1195,6 +1196,15 @@ static ssize_t charge_control_threshold_show(u8 offset,
 	result = ec_read(conf.charge_control.address, &rdata);
 	if (result < 0)
 		return result;
+
+	/*
+	 * The EC may hold an out-of-range value (e.g. 0x80) when no charge
+	 * limit has been set. Report the maximum threshold instead of a
+	 * meaningless (possibly negative) percentage.
+	 */
+	if (rdata < conf.charge_control.range_min ||
+	    rdata > conf.charge_control.range_max)
+		rdata = conf.charge_control.range_max;
 
 	return sysfs_emit(buf, "%i\n", rdata - offset);
 }

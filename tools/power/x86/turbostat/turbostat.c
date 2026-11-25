@@ -1880,15 +1880,17 @@ int pmt_telemdir_filter(const struct dirent *e)
 {
 	unsigned int dummy;
 
-	return sscanf(e->d_name, "telem%u", &dummy);
+	return (sscanf(e->d_name, "telem%u", &dummy) == 1);
 }
 
 int pmt_telemdir_sort(const struct dirent **a, const struct dirent **b)
 {
 	unsigned int aidx = 0, bidx = 0;
 
-	sscanf((*a)->d_name, "telem%u", &aidx);
-	sscanf((*b)->d_name, "telem%u", &bidx);
+	if (sscanf((*a)->d_name, "telem%u", &aidx) != 1)
+		aidx = 0;
+	if (sscanf((*b)->d_name, "telem%u", &bidx) != 1)
+		bidx = 0;
 
 	return (aidx > bidx) ? 1 : (aidx < bidx) ? -1 : 0;
 }
@@ -6176,33 +6178,35 @@ int for_all_proc_cpus(int (func) (int))
 
 #define PATH_EFFECTIVE_CPUS	"/sys/fs/cgroup/cpuset.cpus.effective"
 
-static char cpu_effective_str[1024];
+static char *cpu_effective_str;
 
 static int update_effective_str(bool startup)
 {
 	FILE *fp;
-	char *pos;
-	char buf[1024];
+	char *buf = NULL;
+	size_t size = 0;
 	int ret;
 
-	if (cpu_effective_str[0] == '\0' && !startup)
+	if (!cpu_effective_str && !startup)
 		return 0;
 
 	fp = fopen(PATH_EFFECTIVE_CPUS, "r");
 	if (!fp)
 		return 0;
 
-	pos = fgets(buf, 1024, fp);
-	if (!pos)
-		err(1, "%s: file read failed\n", PATH_EFFECTIVE_CPUS);
+	if (getline(&buf, &size, fp) < 0)
+		err(1, "%s: file read failed", PATH_EFFECTIVE_CPUS);
 
 	fclose(fp);
 
-	ret = strncmp(cpu_effective_str, buf, 1024);
-	if (!ret)
+	ret = cpu_effective_str ? strcmp(cpu_effective_str, buf) : 1;
+	if (!ret) {
+		free(buf);
 		return 0;
+	}
 
-	strncpy(cpu_effective_str, buf, 1024);
+	free(cpu_effective_str);
+	cpu_effective_str = buf;
 	return 1;
 }
 
