@@ -385,17 +385,18 @@ void dwc2_wakeup_from_lpm_l1(struct dwc2_hsotg *hsotg, bool remotewakeup)
 		}
 
 		glpmcfg = dwc2_readl(hsotg, GLPMCFG);
-		if (glpmcfg & GLPMCFG_COREL1RES_MASK || glpmcfg & GLPMCFG_SLPSTS ||
-		    glpmcfg & GLPMCFG_L1RESUMEOK) {
+		/* CoreL1Res records the last LPM handshake, not the sleep state. */
+		if (glpmcfg & (GLPMCFG_SLPSTS | GLPMCFG_L1RESUMEOK)) {
+			dev_dbg(hsotg->dev,
+				"LPM exit incomplete: GLPMCFG=%08x\n", glpmcfg);
 			goto fail;
 			return;
 		}
 
-		/* Inform gadget to exit from L1 */
-		call_gadget(hsotg, resume);
-		/* Change to L0 state */
+		/* Resume callbacks may queue requests, so publish L0 first. */
 		hsotg->lx_state = DWC2_L0;
 		hsotg->bus_suspended = false;
+		call_gadget(hsotg, resume);
 fail:		dwc2_gadget_init_lpm(hsotg);
 	} else {
 		/* TODO */
